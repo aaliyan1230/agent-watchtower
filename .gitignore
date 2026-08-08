@@ -1,0 +1,22 @@
+# never commit the roadmap/concept docs or the repo operating manual
+docs/
+/AGENTS.md
+
+# Go
+watchtower/watchtower
+watchtower/bin/
+*.test
+*.out
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# env / secrets
+.env
+.env.*
+
+# OS noise
+.DS_Store
