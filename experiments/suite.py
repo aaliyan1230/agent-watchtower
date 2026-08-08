@@ -1,0 +1,72 @@
+"""Experiment suite: the parameter grid, built deterministically.
+
+Phase 2 turns this into `run matrix -> checksummed artifacts`; today it
+defines the grid itself: fault type x seed x model variant x run, plus
+clean runs as the false-positive control. Building the grid is a pure
+function — the same seed set yields the same cells, always.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from harness.faults import FaultKind
+
+MODEL_VARIANTS = ["flash", "pro"]  # cheap tier for bulk, pro tier for a stratified sample
+SEEDS = [1, 2, 3, 4, 5]  # sized from pilot results in Phase 2
+RUNS_PER_CELL = 3
+
+
+@dataclass(frozen=True)
+class ExperimentCell:
+    """One run slot in the matrix. fault=None means a clean run — the
+    false-positive control, without which detection rates mean nothing."""
+
+    fault: str | None
+    seed: int
+    model: str
+    run: int
+
+
+def build_grid(
+    faults: list[str] | None = None,
+    seeds: list[int] = SEEDS,
+    models: list[str] = MODEL_VARIANTS,
+    runs: int = RUNS_PER_CELL,
+) -> list[ExperimentCell]:
+    faults = faults or [f.value for f in FaultKind]
+    cells: list[ExperimentCell] = []
+    for fault in faults + [None]:  # None = clean control
+        for seed in seeds:
+            for model in models:
+                for run in range(1, runs + 1):
+                    cells.append(ExperimentCell(fault=fault, seed=seed, model=model, run=run))
+    return cells
+
+
+def checksum(cells: list[ExperimentCell]) -> str:
+    """Grid identity: same cells, same sha256. Artifacts produced from
+    a grid are labelled with this so results can be attributed."""
+    return hashlib.sha256(
+        json.dumps([asdict(c) for c in cells], sort_keys=True).encode()
+    ).hexdigest()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="build the experiment grid")
+    parser.add_argument("--out", type=Path, default=Path("artifacts"))
+    args = parser.parse_args()
+
+    cells = build_grid()
+    args.out.mkdir(parents=True, exist_ok=True)
+    manifest = {"checksum": checksum(cells), "cells": [asdict(c) for c in cells]}
+    (args.out / "grid.json").write_text(json.dumps(manifest, indent=2))
+    print(f"grid: {len(cells)} cells, sha256 {manifest['checksum'][:12]} -> {args.out / 'grid.json'}")
+
+
+if __name__ == "__main__":
+    main()
