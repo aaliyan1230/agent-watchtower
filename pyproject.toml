@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "watchtower-harness"
+version = "0.1.0"
+description = "Python agent harness for the watchtower runtime verifier"
+requires-python = ">=3.10"
+dependencies = [
+    "opentelemetry-api>=1.30",
+    "opentelemetry-sdk>=1.30",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["harness", "experiments"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
