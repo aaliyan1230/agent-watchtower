@@ -19,5 +19,8 @@ __pycache__/
 .env
 .env.*
 
+# experiment outputs (checksummed artifacts live here locally)
+artifacts/
+
 # OS noise
 .DS_Store
