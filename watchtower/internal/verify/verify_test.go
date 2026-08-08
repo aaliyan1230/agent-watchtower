@@ -47,11 +47,12 @@ func TestVerifyAggregate(t *testing.T) {
 	cfg := Config{
 		Contracts: []Contract{{Name: "ticket", Fields: map[string]FieldSpec{"id": {Required: true, Type: TypeInt}}}},
 		Policy:    Policy{AllowedTools: []string{"search"}},
+		Loop:      LoopConfig{Enabled: true},
 		Limits:    Limits{MaxSteps: 10, MaxTotalTokens: 5_000},
 		Judge:     stubJudge{name: "stub"},
 	}
 	f := Verify(run, cfg)
-	if len(f) != 5 {
+	if len(f) != 6 {
 		t.Fatalf("findings = %d, want 6 (schema, policy, loop, budget x2, judge) — got %+v", len(f), f)
 	}
 	wantOrder := []string{"schema", "policy", "loop", "budget", "budget", "stub"}

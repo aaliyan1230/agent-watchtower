@@ -35,10 +35,15 @@ type Contract struct {
 }
 
 // CheckSchema verifies structured outputs against declared contracts.
-// Steps without a contract attribute are not checked; a step referencing
-// an unknown contract is itself a finding (the harness stamped a
-// contract it cannot honor).
+// With no contracts configured the check is disabled entirely — a
+// stamped contract name is only meaningful against a declared contract
+// (opt-in, like every other check). Steps without a contract attribute
+// are not checked; a step referencing an unknown contract is itself a
+// finding (the harness stamped a contract it cannot honor).
 func CheckSchema(run *graph.Run, contracts []Contract) []Finding {
+	if len(contracts) == 0 {
+		return nil
+	}
 	byName := make(map[string]Contract, len(contracts))
 	for _, c := range contracts {
 		byName[c.Name] = c

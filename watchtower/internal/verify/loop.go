@@ -6,13 +6,15 @@ import (
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
 )
 
-// LoopConfig tunes loop detection. Thresholds are conservative:
-// repeated *identical* calls (same tool, same argument hash) and
-// two-step oscillations (A,B,A,B) are the cheap-to-spot signatures of
-// an agent stuck in a loop.
+// LoopConfig tunes loop detection; Enabled makes the check opt-in like
+// every other verifier (zero config must verify nothing). Thresholds
+// are conservative: repeated *identical* calls (same tool, same
+// argument hash) and two-step oscillations (A,B,A,B) are the
+// cheap-to-spot signatures of an agent stuck in a loop.
 type LoopConfig struct {
-	MaxRepetitions int `json:"maxRepetitions"` // > this many identical calls = loop (default 2)
-	MinCycleLength int `json:"minCycleLength"` // oscillation window (default 4)
+	Enabled        bool `json:"enabled"`
+	MaxRepetitions int  `json:"maxRepetitions"` // > this many identical calls = loop (default 2)
+	MinCycleLength int  `json:"minCycleLength"` // oscillation window (default 4)
 }
 
 func (c LoopConfig) withDefaults() LoopConfig {

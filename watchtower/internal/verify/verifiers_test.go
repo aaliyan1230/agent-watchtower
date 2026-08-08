@@ -80,7 +80,7 @@ func TestCheckLoop(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := CheckLoop(&graph.Run{Steps: tt.steps}, LoopConfig{})
+			f := CheckLoop(&graph.Run{Steps: tt.steps}, LoopConfig{Enabled: true})
 			if len(f) != tt.want {
 				t.Fatalf("findings = %d, want %d (%+v)", len(f), tt.want, f)
 			}

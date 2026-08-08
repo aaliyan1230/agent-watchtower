@@ -33,8 +33,9 @@ func TestIngest(t *testing.T) {
 		ingestErr  error
 		wantStatus int
 		wantCalled bool
+		wantBody   string
 	}{
-		{name: "valid envelope accepted", method: "POST", path: "/v1/traces", body: validEnvelopeJSON(t), wantStatus: 202, wantCalled: true},
+		{name: "valid envelope accepted", method: "POST", path: "/v1/traces", body: validEnvelopeJSON(t), wantStatus: 202, wantCalled: true, wantBody: `"accepted"`},
 		{name: "malformed json", method: "POST", path: "/v1/traces", body: []byte("{nope"), wantStatus: 400},
 		{name: "invalid span", method: "POST", path: "/v1/traces", body: []byte(`{"spans":[{"spanId":"x"}]}`), wantStatus: 400},
 		{name: "trailing garbage", method: "POST", path: "/v1/traces", body: append(validEnvelopeJSON(t), []byte(`{}`)...), wantStatus: 400},
@@ -45,12 +46,12 @@ func TestIngest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			h := New(func(env *model.Envelope) error {
+			h := New(func(env *model.Envelope) ([]byte, error) {
 				called = true
 				if len(env.Spans) != 1 {
 					t.Errorf("ingest received %d spans, want 1", len(env.Spans))
 				}
-				return tt.ingestErr
+				return []byte(`"accepted"`), tt.ingestErr
 			})
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(string(tt.body)))
 			rec := httptest.NewRecorder()
@@ -60,6 +61,9 @@ func TestIngest(t *testing.T) {
 			}
 			if called != tt.wantCalled {
 				t.Fatalf("ingest called = %v, want %v", called, tt.wantCalled)
+			}
+			if tt.wantBody != "" && !strings.Contains(rec.Body.String(), tt.wantBody) {
+				t.Fatalf("body = %q, want it to contain %q", rec.Body.String(), tt.wantBody)
 			}
 		})
 	}

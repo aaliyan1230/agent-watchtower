@@ -1,0 +1,72 @@
+{
+  "resource": { "service.name": "harness-demo" },
+  "spans": [
+    {
+      "traceId": "trace-clean",
+      "spanId": "s0",
+      "name": "agent.run",
+      "kind": "internal",
+      "startTime": "2026-08-10T10:00:00Z",
+      "endTime": "2026-08-10T10:00:09Z",
+      "status": "ok",
+      "attributes": { "agent.name": "supervisor" }
+    },
+    {
+      "traceId": "trace-clean",
+      "spanId": "s1",
+      "parentSpanId": "s0",
+      "name": "chat",
+      "kind": "client",
+      "startTime": "2026-08-10T10:00:01Z",
+      "endTime": "2026-08-10T10:00:02Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": "fake",
+        "gen_ai.request.model": "fake-flash",
+        "gen_ai.usage.input_tokens": "20",
+        "gen_ai.usage.output_tokens": "30",
+        "watchtower.contract": "ticket",
+        "watchtower.output": "{\"id\": 1, \"title\": \"broken login\", \"labels\": [\"auth\"]}"
+      }
+    },
+    {
+      "traceId": "trace-clean",
+      "spanId": "s2",
+      "parentSpanId": "s1",
+      "name": "tool.call",
+      "kind": "client",
+      "startTime": "2026-08-10T10:00:03Z",
+      "endTime": "2026-08-10T10:00:04Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "tool.name": "search",
+        "tool.call.id": "c1",
+        "tool.result.ok": "true",
+        "watchtower.tool.args": "{\"q\": \"login\"}"
+      }
+    },
+    {
+      "traceId": "trace-clean",
+      "spanId": "s3",
+      "parentSpanId": "s0",
+      "name": "chat",
+      "kind": "client",
+      "startTime": "2026-08-10T10:00:05Z",
+      "endTime": "2026-08-10T10:00:06Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": "fake",
+        "gen_ai.request.model": "fake-flash",
+        "gen_ai.usage.input_tokens": "5",
+        "gen_ai.usage.output_tokens": "10",
+        "watchtower.contract": "ticket",
+        "watchtower.output": "{\"id\": 1, \"title\": \"broken login\"}"
+      }
+    }
+  ]
+}

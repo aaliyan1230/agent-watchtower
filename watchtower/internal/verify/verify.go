@@ -43,24 +43,28 @@ type Finding struct {
 
 // Config aggregates every verifier's configuration; zero values mean
 // "check disabled". WithDefaults fills in sensible defaults for the
-// optional knobs (loop thresholds).
+// optional knobs (loop thresholds). JSON tags map a config file onto
+// this struct directly.
 type Config struct {
-	Contracts []Contract // schema verifier
-	Policy    Policy     // tool allowlist
-	Loop      LoopConfig // loop detection thresholds
-	Limits    Limits     // budget limits
-	Judge     Judge      // optional LLM judge (nil = skip)
+	Contracts []Contract `json:"contracts"`
+	Policy    Policy     `json:"policy"`
+	Loop      LoopConfig `json:"loop"`
+	Limits    Limits     `json:"limits"`
+	Judge     Judge      `json:"-"` // never from a config file; wired by code
 }
 
 // Verify runs every enabled verifier over the run and concatenates the
 // findings, keeping verifier order (schema, policy, loop, budget,
-// judge). Judge failures surface as findings rather than errors: the
-// judge is a supplement, its outage must not hide deterministic results.
+// judge). Every check is opt-in: zero config verifies nothing. Judge
+// failures surface as findings rather than errors: the judge is a
+// supplement, its outage must not hide deterministic results.
 func Verify(run *graph.Run, cfg Config) []Finding {
 	var out []Finding
 	out = append(out, CheckSchema(run, cfg.Contracts)...)
 	out = append(out, CheckPolicy(run, cfg.Policy)...)
-	out = append(out, CheckLoop(run, cfg.Loop.withDefaults())...)
+	if cfg.Loop.Enabled {
+		out = append(out, CheckLoop(run, cfg.Loop.withDefaults())...)
+	}
 	out = append(out, CheckBudget(run, cfg.Limits)...)
 	if cfg.Judge != nil {
 		if js, err := cfg.Judge.Run(run); err != nil {

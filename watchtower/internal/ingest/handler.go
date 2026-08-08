@@ -18,12 +18,14 @@ import (
 const maxBodyBytes = 10 << 20 // 10 MiB: a trace should never approach this
 
 // Handler is the ingest HTTP handler. Ingest is called with each valid
-// envelope; if it returns an error, the client gets a 500.
+// envelope; its return value is written as the response body (nil means
+// no body) — the caller decides what a trace *means* (a report, a
+// receipt, nothing).
 type Handler struct {
-	Ingest func(*model.Envelope) error
+	Ingest func(*model.Envelope) ([]byte, error)
 }
 
-func New(ingest func(*model.Envelope) error) *Handler {
+func New(ingest func(*model.Envelope) ([]byte, error)) *Handler {
 	return &Handler{Ingest: ingest}
 }
 
@@ -63,10 +65,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ingest not configured", http.StatusInternalServerError)
 		return
 	}
-	if err := h.Ingest(&env); err != nil {
+	payload, err := h.Ingest(&env)
+	if err != nil {
 		log.Printf("ingest: %v", err)
 		http.Error(w, "internal ingest error", http.StatusInternalServerError)
 		return
 	}
+	if len(payload) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	// WriteHeader must precede Write: writing the body would otherwise
+	// implicitly send 200 and the explicit 202 would be a no-op.
 	w.WriteHeader(http.StatusAccepted)
+	if len(payload) > 0 {
+		_, _ = w.Write(payload)
+	}
 }

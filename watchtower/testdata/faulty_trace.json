@@ -1,0 +1,123 @@
+{
+  "resource": { "service.name": "harness-demo" },
+  "spans": [
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s0",
+      "name": "agent.run",
+      "kind": "internal",
+      "startTime": "2026-08-10T11:00:00Z",
+      "endTime": "2026-08-10T11:00:30Z",
+      "status": "ok",
+      "attributes": { "agent.name": "supervisor" }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s1",
+      "parentSpanId": "s0",
+      "name": "chat",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:01Z",
+      "endTime": "2026-08-10T11:00:02Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": "fake",
+        "gen_ai.request.model": "fake-flash",
+        "gen_ai.usage.input_tokens": "100",
+        "gen_ai.usage.output_tokens": "100",
+        "watchtower.contract": "ticket",
+        "watchtower.output": "{\"id\": \"not-an-int\", \"title\": 42}"
+      }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s2",
+      "parentSpanId": "s1",
+      "name": "tool.call",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:03Z",
+      "endTime": "2026-08-10T11:00:04Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "tool.name": "rm",
+        "tool.call.id": "c1",
+        "tool.result.ok": "true",
+        "watchtower.tool.args": "{\"path\": \"/\"}"
+      }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s3",
+      "parentSpanId": "s0",
+      "name": "tool.call",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:05Z",
+      "endTime": "2026-08-10T11:00:06Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "tool.name": "search",
+        "tool.call.id": "c2",
+        "tool.result.ok": "true",
+        "watchtower.tool.args": "{\"q\": \"loop\"}"
+      }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s4",
+      "parentSpanId": "s0",
+      "name": "tool.call",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:07Z",
+      "endTime": "2026-08-10T11:00:08Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "tool.name": "search",
+        "tool.call.id": "c3",
+        "tool.result.ok": "true",
+        "watchtower.tool.args": "{\"q\": \"loop\"}"
+      }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s5",
+      "parentSpanId": "s0",
+      "name": "tool.call",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:09Z",
+      "endTime": "2026-08-10T11:00:10Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "tool.name": "search",
+        "tool.call.id": "c4",
+        "tool.result.ok": "true",
+        "watchtower.tool.args": "{\"q\": \"loop\"}"
+      }
+    },
+    {
+      "traceId": "trace-faulty",
+      "spanId": "s6",
+      "parentSpanId": "s0",
+      "name": "chat",
+      "kind": "client",
+      "startTime": "2026-08-10T11:00:11Z",
+      "endTime": "2026-08-10T11:00:12Z",
+      "status": "ok",
+      "attributes": {
+        "agent.name": "worker-a",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": "fake",
+        "gen_ai.request.model": "fake-flash",
+        "gen_ai.usage.input_tokens": "50",
+        "gen_ai.usage.output_tokens": "50",
+        "watchtower.contract": "ticket",
+        "watchtower.output": "{\"id\": 7, \"title\": \"done\"}"
+      }
+    }
+  ]
+}
