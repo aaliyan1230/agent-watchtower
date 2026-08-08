@@ -54,7 +54,7 @@ func TestCheckSchema(t *testing.T) {
 		{name: "multiple violations", steps: []graph.Step{
 			llmStep("ticket", `{}`),
 			llmStep("ticket", `{"id": "x", "title": 3}`),
-		}, want: 3},
+		}, want: 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
