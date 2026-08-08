@@ -6,7 +6,7 @@ reconstructs, verifies, and returns an evidence-backed verdict.
 
 from .providers import FakeProvider, GeminiProvider, Provider, ProviderResponse
 from .faults import FaultInjector, FaultKind, FaultSpec
-from .telemetry import HarnessTelemetry, WatchtowerExporter
+from .telemetry import HarnessTelemetry
 from .workers import Tool, Worker
 from .supervisor import Supervisor
 
@@ -19,7 +19,6 @@ __all__ = [
     "FaultKind",
     "FaultSpec",
     "HarnessTelemetry",
-    "WatchtowerExporter",
     "Tool",
     "Worker",
     "Supervisor",

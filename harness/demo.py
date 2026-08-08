@@ -12,11 +12,11 @@ Run from the repo root: `make demo` (or `.venv/bin/python -m harness.demo`).
 
 from __future__ import annotations
 
-import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from harness.faults import FaultInjector, FaultKind, FaultSpec
 from harness.providers import FakeProvider, ProviderResponse
@@ -26,8 +26,12 @@ from harness.workers import Tool, Worker
 
 ENDPOINT = "http://127.0.0.1:4318"
 SERVE_ADDR = "127.0.0.1:4318"
-CONFIG = os.path.join("watchtower", "testdata", "demo_config.json")
-GO_ROOT = "watchtower"
+# Resolve paths from this file's location so the demo works no matter
+# what cwd it is launched from (the spawned server runs with its own
+# cwd and needs absolute paths).
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG = str(REPO_ROOT / "watchtower" / "testdata" / "demo_config.json")
+GO_ROOT = str(REPO_ROOT / "watchtower")
 
 
 def search(query: str) -> str:
@@ -111,9 +115,11 @@ def build_workers(telemetry: HarnessTelemetry, fault_spec: FaultSpec | None):
 def scenario(telemetry: HarnessTelemetry, fault: FaultSpec | None, label: str):
     workers = build_workers(telemetry, fault)
     supervisor = Supervisor("supervisor", telemetry.tracer())
-    supervisor.run("Triage ticket #42: users cannot log in", workers)
-    telemetry.flush()
-    report = telemetry.exporter._last_report  # noqa: SLF001 — demo reads its own exporter
+    result = supervisor.run("Triage ticket #42: users cannot log in", workers)
+    if not telemetry.flush():
+        print(f"  {label:<14} ingest rejected the trace")
+        return "?"
+    report = telemetry.fetch_report(result.trace_id)
     verdict = report.get("verdict", "?") if report else "NO REPORT"
     print(f"  {label:<14} verdict: {verdict}")
     if report:
