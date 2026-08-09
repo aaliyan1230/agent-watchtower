@@ -39,6 +39,16 @@ type Finding struct {
 	SpanIDs    []string `json:"spanIds"`
 	Timestamps []string `json:"timestamps,omitempty"` // RFC3339 of offending spans
 	Value      string   `json:"value,omitempty"`      // the offending value, if any
+	Source     string   `json:"source,omitempty"`     // judge model, when a judge produced it
+}
+
+// JudgeConfig is the JSON-configurable part of the judge slot. The
+// judge itself is constructed by the CLI layer (it needs env keys);
+// verify only carries the config.
+type JudgeConfig struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model"`   // empty = provider default
+	BaseURL string `json:"baseUrl"` // override for tests / alternate endpoints
 }
 
 // Config aggregates every verifier's configuration; zero values mean
@@ -46,11 +56,12 @@ type Finding struct {
 // optional knobs (loop thresholds). JSON tags map a config file onto
 // this struct directly.
 type Config struct {
-	Contracts []Contract `json:"contracts"`
-	Policy    Policy     `json:"policy"`
-	Loop      LoopConfig `json:"loop"`
-	Limits    Limits     `json:"limits"`
-	Judge     Judge      `json:"-"` // never from a config file; wired by code
+	Contracts []Contract  `json:"contracts"`
+	Policy    Policy      `json:"policy"`
+	Loop      LoopConfig  `json:"loop"`
+	Limits    Limits      `json:"limits"`
+	JudgeCfg  JudgeConfig `json:"judge"`
+	Judge     Judge       `json:"-"` // constructed by the CLI from JudgeCfg + env keys
 }
 
 // Verify runs every enabled verifier over the run and concatenates the

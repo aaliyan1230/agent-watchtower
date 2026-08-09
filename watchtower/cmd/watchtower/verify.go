@@ -29,6 +29,10 @@ func newVerifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			cfg.Judge, err = buildJudge(cfg)
+			if err != nil {
+				return err
+			}
 			run, err := graph.Reconstruct(env.Spans)
 			if err != nil {
 				return fmt.Errorf("reconstruct: %w", err)

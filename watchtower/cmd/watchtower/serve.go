@@ -30,6 +30,10 @@ func newServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			cfg.Judge, err = buildJudge(cfg)
+			if err != nil {
+				return err
+			}
 			log.Printf("watchtower listening on %s", addr)
 			return http.ListenAndServe(addr, newServeMux(cfg, report.NewStore(5*time.Minute)))
 		},
