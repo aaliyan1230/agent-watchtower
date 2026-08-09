@@ -77,6 +77,7 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 		out = append(out, CheckLoop(run, cfg.Loop.withDefaults())...)
 	}
 	out = append(out, CheckBudget(run, cfg.Limits)...)
+	out = append(out, CheckStatus(run)...)
 	if cfg.Judge != nil {
 		if js, err := cfg.Judge.Run(run); err != nil {
 			out = append(out, Finding{
@@ -93,4 +94,4 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 
 // VerifierNames lists the deterministic verifiers, in run order — used
 // by the report and experiments for per-verifier detection rates.
-var VerifierNames = []string{"schema", "policy", "loop", "budget"}
+var VerifierNames = []string{"schema", "policy", "loop", "budget", "status"}

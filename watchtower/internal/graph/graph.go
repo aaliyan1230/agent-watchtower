@@ -42,6 +42,8 @@ type Step struct {
 	Output       string // watchtower.output (raw model output)
 	InputTokens  int64
 	OutputTokens int64
+	Status       model.StatusCode
+	StatusMsg    string
 	StartTime    time.Time
 	EndTime      time.Time
 }
@@ -154,6 +156,8 @@ func stepFrom(s *model.Span, order int) Step {
 		Order:     order,
 		SpanID:    s.SpanID,
 		Name:      s.Name,
+		Status:    s.Status,
+		StatusMsg: s.StatusMsg,
 		StartTime: s.StartTime,
 		EndTime:   s.EndTime,
 	}

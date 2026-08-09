@@ -45,8 +45,8 @@ func TestBuildSummarizesVerifiers(t *testing.T) {
 	if r.Verdict != VerdictFail {
 		t.Fatalf("verdict = %s, want FAIL", r.Verdict)
 	}
-	if len(r.Verifiers) != 4 {
-		t.Fatalf("verifiers = %d, want 4 (schema, policy, loop, budget)", len(r.Verifiers))
+	if len(r.Verifiers) != 5 {
+		t.Fatalf("verifiers = %d, want 5 (schema, policy, loop, budget, status)", len(r.Verifiers))
 	}
 	if r.Verifiers[0].Name != "schema" || r.Verifiers[0].Findings != 2 || r.Verifiers[0].MaxSeverity != verify.SeverityCritical {
 		t.Errorf("schema summary = %+v", r.Verifiers[0])
