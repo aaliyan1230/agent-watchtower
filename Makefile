@@ -13,6 +13,9 @@ serve: ## run watchtower serve on :4318
 demo: ## offline python demo: fake provider -> spans -> serve -> report
 	.venv/bin/python -m harness.demo
 
+live: ## live smoke test (needs GEMINI_API_KEY in .env)
+	.venv/bin/python -m harness.live_smoke
+
 venv: ## create .venv and install harness + experiments
 	python3 -m venv .venv
 	.venv/bin/pip install -e .
