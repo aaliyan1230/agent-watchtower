@@ -10,6 +10,7 @@ mistakes.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -108,7 +109,6 @@ class Worker:
 
     def _exec_tool(self, tool_call: dict[str, Any], step: int) -> str:
         name, args = tool_call["name"], tool_call.get("args", {})
-        import json as _json
 
         with self._tracer.start_as_current_span(
             "tool.call",
@@ -116,7 +116,7 @@ class Worker:
                 semconv.AGENT_NAME: self.name,
                 semconv.STEP_INDEX: str(step),
                 semconv.TOOL_NAME: name,
-                semconv.WATCHTOWER_TOOL_ARGS: _json.dumps(args),
+                semconv.WATCHTOWER_TOOL_ARGS: json.dumps(args),
             },
         ):
             tool = self._tools.get(name)

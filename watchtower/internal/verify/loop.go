@@ -47,7 +47,6 @@ func CheckLoop(run *graph.Run, cfg LoopConfig) []Finding {
 
 	var out []Finding
 
-	// Repetition: the same call appearing more than MaxRepetitions times.
 	counts := make(map[call]int)
 	for _, c := range seq {
 		counts[c]++
@@ -73,7 +72,6 @@ func CheckLoop(run *graph.Run, cfg LoopConfig) []Finding {
 		})
 	}
 
-	// Oscillation: an alternating pattern (A,B,A,B) within the window.
 	for i := 0; i+cfg.MinCycleLength <= len(seq); i++ {
 		if seq[i] == seq[i+2] && seq[i+1] == seq[i+3] && seq[i] != seq[i+1] {
 			var spans []string
