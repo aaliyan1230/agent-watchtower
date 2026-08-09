@@ -94,7 +94,10 @@ func stripFences(text string) string {
 }
 
 // summarizeRun renders the run as compact evidence: one line per step
-// plus the budget. Compactness matters — judge cost is a paper metric.
+// plus the budget and the final answer. Compactness matters — judge
+// cost is a paper metric. Marking the final answer matters more: a
+// judge that cannot tell "completed" from "truncated" will flag every
+// healthy run (observed with Nova and DeepSeek).
 func summarizeRun(run *graph.Run) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "trace %s\n", run.TraceID)
@@ -110,5 +113,24 @@ func summarizeRun(run *graph.Run) string {
 	}
 	budget := run.Budget
 	fmt.Fprintf(&b, "budget steps=%d tokens=%d duration_ms=%d\n", budget.SpanCount, budget.TotalTokens, budget.DurationMs)
+	fmt.Fprintf(&b, "final_answer: %s\n", finalAnswer(run))
 	return b.String()
+}
+
+// finalAnswer returns the last recorded structured output, or "none"
+// when the run ended without one.
+func finalAnswer(run *graph.Run) string {
+	for i := len(run.Steps) - 1; i >= 0; i-- {
+		if out := run.Steps[i].Output; out != "" {
+			return truncate(out, 200)
+		}
+	}
+	return "none"
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

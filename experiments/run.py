@@ -15,6 +15,7 @@ Usage: python -m experiments.run [--grid artifacts/grid.json]
 from __future__ import annotations
 
 import argparse
+import subprocess
 import json
 import time
 from dataclasses import asdict, dataclass, field
