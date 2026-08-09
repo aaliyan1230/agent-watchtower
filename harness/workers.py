@@ -34,6 +34,19 @@ class Tool:
         return tool_schema(self.name, self.description, self.args_schema)
 
 
+@dataclass
+class StepInfo:
+    """One completed turn or tool call, handed to the supervisor's
+    monitor so it can decide whether to intervene."""
+
+    worker: str
+    step: int
+    kind: str  # "llm" | "tool"
+    tool: str | None = None
+    tool_ok: bool | None = None
+    tokens: int = 0
+
+
 class Worker:
     """A tool-calling worker agent. `contract` names a structured-output
     contract the final answer must honor; the harness stamps it on the
@@ -59,11 +72,16 @@ class Worker:
         self.contract = contract
         self.max_steps = max_steps
         self.agent_id = agent_id
+        self.halted = False
+        self.rerouted = False
 
-    def run(self, task: str, parent_context=None) -> str:
+    def run(self, task: str, parent_context=None, monitor: Callable[[StepInfo], str] | None = None) -> str:
         """Run one task to completion (or max_steps) and return the
-        final answer. Each iteration is an LLM span; each executed tool
-        call is a child tool span."""
+        final answer. The monitor, if any, gets a StepInfo after every
+        turn and tool call and may return "halt" or "reroute" to stop
+        the loop."""
+        self.halted = False
+        self.rerouted = False
         messages: list[dict[str, str]] = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": task},
@@ -78,11 +96,30 @@ class Worker:
                 resp = self._turn(messages, tool_schemas, step)
                 if resp.tool_calls:
                     for tc in resp.tool_calls:
-                        result = self._exec_tool(tc, step)
+                        ok, result = self._exec_tool(tc, step)
                         messages.append({"role": "tool", "content": result})
+                        if monitor:
+                            action = monitor(StepInfo(
+                                worker=self.name, step=step, kind="tool",
+                                tool=tc["name"], tool_ok=ok,
+                                tokens=resp.input_tokens + resp.output_tokens,
+                            ))
+                            if action != "continue":
+                                return self._stop(action)
                     continue
+                if monitor:
+                    action = monitor(StepInfo(worker=self.name, step=step, kind="llm", tokens=resp.input_tokens + resp.output_tokens))
+                    if action != "continue":
+                        return self._stop(action)
                 return resp.content.strip()
         return "(no final answer within max_steps)"
+
+    def _stop(self, action: str) -> str:
+        if action == "reroute":
+            self.rerouted = True
+            return "(rerouted by supervisor)"
+        self.halted = True
+        return "(halted by supervisor)"
 
     def _turn(self, messages, tool_schemas, step: int) -> ProviderResponse:
         with self._tracer.start_as_current_span(
@@ -107,7 +144,7 @@ class Worker:
                 span.set_attribute(semconv.WATCHTOWER_OUTPUT, resp.content)
             return resp
 
-    def _exec_tool(self, tool_call: dict[str, Any], step: int) -> str:
+    def _exec_tool(self, tool_call: dict[str, Any], step: int) -> tuple[bool, str]:
         name, args = tool_call["name"], tool_call.get("args", {})
 
         with self._tracer.start_as_current_span(
@@ -121,14 +158,13 @@ class Worker:
         ):
             tool = self._tools.get(name)
             if tool is None:
-                msg = f"unknown tool {name}"
                 get_current_span().set_attribute(semconv.TOOL_RESULT_OK, "false")
-                return msg
+                return False, f"unknown tool {name}"
             try:
                 result = tool.func(**args)
                 get_current_span().set_attribute(semconv.TOOL_RESULT_OK, "true")
-                return str(result)
+                return True, str(result)
             except Exception as exc:  # tool errors are data, not crashes
                 get_current_span().set_attribute(semconv.TOOL_RESULT_OK, "false")
                 get_current_span().set_attribute(semconv.TOOL_RESULT_MSG, str(exc))
-                return f"tool error: {exc}"
+                return False, f"tool error: {exc}"
