@@ -14,6 +14,7 @@ Ground truth conventions:
 
 from __future__ import annotations
 
+import json
 from typing import Iterable, Mapping, Sequence
 
 
@@ -105,3 +106,104 @@ def judge_consensus(judge_votes: Sequence[Sequence[bool]]) -> Sequence[bool]:
         votes = [r[i] for r in judge_votes]
         out.append(sum(votes) > len(votes) / 2)
     return out
+
+
+# --- Phase 2: analysis over collected results artifacts -------------------
+
+def load_results(path: str) -> dict:
+    """Load a results artifact produced by experiments.run."""
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def fault_coverage(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
+    """For each fault type, the fraction of its runs each verifier
+    caught — the "where deterministic catches what" matrix."""
+    faults = sorted({r["fault"] for r in results if r["fault"]})
+    verifiers = sorted({f["verifier"] for r in results if r["fault"] for f in r["findings"]})
+    out: dict[str, dict[str, float]] = {}
+    for fault in faults:
+        runs = [r for r in results if r["fault"] == fault]
+        out[fault] = {
+            v: sum(any(f["verifier"] == v for f in r["findings"]) for r in runs) / len(runs)
+            for v in verifiers
+        }
+    return out
+
+
+def overhead_summary(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
+    """Mean tokens and wall-clock duration per fault group — the
+    overhead the paper reports (cost is per-token, so tokens are the
+    honest proxy without live pricing)."""
+    groups = sorted({r["fault"] or "clean" for r in results})
+    out: dict[str, dict[str, float]] = {}
+    for group in groups:
+        runs = [r for r in results if (r["fault"] or "clean") == group]
+        tokens = [r["budget"].get("totalTokens", 0) for r in runs]
+        duration = [r["budget"].get("durationMs", 0) for r in runs]
+        out[group] = {"meanTokens": sum(tokens) / len(tokens), "meanDurationMs": sum(duration) / len(duration)}
+    return out
+
+
+def judge_vs_deterministic(results: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Cohen's kappa between the judge's opinion and the deterministic
+    verdicts, over judged runs. Deterministic opinion = any non-judge
+    finding; judge opinion = any judge finding. None when no judged
+    runs exist (offline matrix)."""
+    judged = [r for r in results if r.get("judged")]
+    if not judged:
+        return None, 0
+    det = [any(f["verifier"] != "judge" for f in r["findings"]) for r in judged]
+    jdg = [any(f["verifier"] == "judge" for f in r["findings"]) for r in judged]
+    return cohen_kappa(det, jdg), len(judged)
+
+
+def _pct(x: float) -> str:
+    return f"{x:.0%}"
+
+
+def render_table(results: Sequence[Mapping]) -> str:
+    """The paper's headline table: per-fault detection, per-verifier
+    coverage, false positives, overhead, judge agreement."""
+    cells = list(results)
+    verdicts = [r["verdict"] for r in cells]
+    truth = [r["fault"] is not None for r in cells]
+    det = detection_rate(verdicts, truth)
+    fpr = false_positive_rate(verdicts, truth)
+
+    lines = ["watchtower experiment results"]
+    lines.append(f"runs={len(cells)}")
+    lines.append(f"overall detection: {_pct(det)}   false positives (clean runs): {_pct(fpr)}")
+    lines.append("")
+    lines.append("coverage: fault x verifier (fraction of faulted runs caught)")
+    coverage = fault_coverage(cells)
+    verifiers = sorted({v for row in coverage.values() for v in row})
+    header = f"{'fault':<18}" + "".join(f"{v:>10}" for v in verifiers) + f"{'detected':>10}"
+    lines.append(header)
+    for fault, row in sorted(coverage.items()):
+        fault_runs = [r for r in cells if r["fault"] == fault]
+        detected = sum(r["verdict"] != "PASS" for r in fault_runs) / len(fault_runs)
+        line = f"{fault:<18}" + "".join(f"{_pct(row.get(v, 0.0)):>10}" for v in verifiers) + f"{_pct(detected):>10}"
+        lines.append(line)
+    lines.append("")
+    lines.append("overhead (mean per run)")
+    for group, stats in overhead_summary(cells).items():
+        lines.append(f"  {group:<18} tokens={stats['meanTokens']:>6.0f}  duration={stats['meanDurationMs']:>6.0f}ms")
+    kappa, n_judged = judge_vs_deterministic(cells)
+    if kappa is not None:
+        lines.append("")
+        lines.append(f"judge vs deterministic agreement (n={n_judged} judged runs): kappa={kappa:.2f}")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="analyze experiment results")
+    parser.add_argument("--results", type=str, default="artifacts/results.json")
+    args = parser.parse_args()
+    print(render_table(load_results(args.results)["cells"]))
+
+
+if __name__ == "__main__":
+    main()

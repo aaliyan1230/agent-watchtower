@@ -20,5 +20,11 @@ venv: ## create .venv and install harness + experiments
 	python3 -m venv .venv
 	.venv/bin/pip install -e .
 
-experiment: ## run the seeded experiment suite
+experiment: ## offline matrix run + analysis (deterministic, free)
 	.venv/bin/python -m experiments.suite --out artifacts
+	.venv/bin/python -m experiments.run --grid artifacts/grid.json --out artifacts/results.json
+	.venv/bin/python -m experiments.analyze --results artifacts/results.json
+
+experiment-live: ## small live stratified sample (needs GEMINI_API_KEY in .env)
+	.venv/bin/python -m experiments.run --live --limit 12 --out artifacts/results-live.json
+	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json
