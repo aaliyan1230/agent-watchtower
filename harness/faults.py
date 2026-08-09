@@ -22,9 +22,11 @@ from typing import Any
 from .providers import Provider, ProviderResponse
 
 # Tools the faults inject. Deliberately NOT in the allowlist used by
-# the policy verifier, so a policy fault is always detected.
-DISALLOWED_TOOL = {"name": "rm", "args": {"path": "/tmp/watchtower"}}
-LOOP_TOOL = {"name": "search", "args": {"q": "stuck-loop"}}
+# the policy verifier, so a policy fault is always detected. The id
+# must be stable: live providers reject tool results whose id does not
+# match an assistant tool call.
+DISALLOWED_TOOL = {"name": "rm", "args": {"path": "/tmp/watchtower"}, "id": "call-fault-0"}
+LOOP_TOOL = {"name": "search", "args": {"q": "stuck-loop"}, "id": "call-fault-1"}
 CONTRACT_ID_FIELD = "id"  # the schema faults corrupt this field
 
 
@@ -85,20 +87,59 @@ def _corrupt(resp: ProviderResponse, spec: FaultSpec) -> ProviderResponse:
     elif kind is FaultKind.POLICY_VIOLATION:
         out.tool_calls = [DISALLOWED_TOOL]
     elif kind is FaultKind.LOOP:
-        out.tool_calls = [LOOP_TOOL, LOOP_TOOL, LOOP_TOOL]
+        out.tool_calls = [
+            {"name": "search", "args": {"q": "stuck-loop"}, "id": f"call-fault-{i}"}
+            for i in range(3)
+        ]
     elif kind is FaultKind.BUDGET_BLOWOUT:
-        out.input_tokens *= 10
-        out.output_tokens *= 10
+        out.input_tokens *= 100
+        out.output_tokens *= 100
     elif kind is FaultKind.PROVIDER_TIMEOUT:
         raise TimeoutError("provider timed out (injected fault)")
+    _sync_assistant(out)
     return out
+
+
+def _sync_assistant(resp: ProviderResponse) -> None:
+    """Make the echoed assistant message match the corrupted tool
+    calls: live providers require tool results to answer the exact
+    assistant tool calls (same ids) that preceded them. Extra fields
+    (Gemini's internal thought_signature) are preserved from the
+    original entries, by id when possible, else positionally."""
+    if not resp.tool_calls or not resp.assistant_message:
+        return
+    originals = resp.assistant_message.get("tool_calls", [])
+    rewritten = []
+    for i, tc in enumerate(resp.tool_calls):
+        orig = next((o for o in originals if o.get("id") == tc.get("id")), None)
+        if orig is None and i < len(originals):
+            orig = originals[i]
+        entry = {
+            "id": tc.get("id", ""),
+            "type": "function",
+            "function": {"name": tc["name"], "arguments": json.dumps(tc.get("args", {}))},
+        }
+        if orig and "extra_content" in orig:
+            entry["extra_content"] = orig["extra_content"]
+        rewritten.append(entry)
+    resp.assistant_message = {**resp.assistant_message, "tool_calls": rewritten}
 
 
 def _corrupt_contract(content: str) -> str:
     """Flip the contract's id field to a string: schema-valid JSON,
-    semantically wrong — exactly what the schema verifier exists for."""
+    semantically wrong — exactly what the schema verifier exists for.
+    Fences are stripped first: a fenced answer would otherwise bounce
+    the parse and skip the corruption."""
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
     try:
-        doc: dict[str, Any] = json.loads(content)
+        doc: dict[str, Any] = json.loads(text)
     except json.JSONDecodeError:
         return content
     if isinstance(doc, dict) and CONTRACT_ID_FIELD in doc:

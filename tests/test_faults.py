@@ -34,7 +34,7 @@ def test_schema_violation_flips_id_to_string():
 
 def test_policy_violation_injects_disallowed_tool():
     out = inject(FaultSpec(FaultKind.POLICY_VIOLATION, seed=1))
-    assert out.tool_calls == [{"name": "rm", "args": {"path": "/tmp/watchtower"}}]
+    assert out.tool_calls == [{"name": "rm", "args": {"path": "/tmp/watchtower"}, "id": "call-fault-0"}]
 
 
 def test_loop_repeats_tool_three_times():
@@ -45,7 +45,7 @@ def test_loop_repeats_tool_three_times():
 
 def test_budget_blowout_inflates_tokens():
     out = inject(FaultSpec(FaultKind.BUDGET_BLOWOUT, seed=1))
-    assert out.input_tokens == 100 and out.output_tokens == 200
+    assert out.input_tokens == 1000 and out.output_tokens == 2000
 
 
 def test_timeout_raises():
@@ -65,7 +65,7 @@ def test_step_selection_skips_early_turns():
     second = p.chat([])
     third = p.chat([])
     assert first.input_tokens == 10 and second.input_tokens == 10
-    assert third.input_tokens == 100
+    assert third.input_tokens == 1000
 
 
 def test_no_spec_passthrough():

@@ -47,6 +47,20 @@ class StepInfo:
     tokens: int = 0
 
 
+def _strip_fences(content: str) -> str:
+    """Gemini often wraps JSON answers in markdown fences; the schema
+    verifier needs the raw document, so the harness normalizes."""
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 class Worker:
     """A tool-calling worker agent. `contract` names a structured-output
     contract the final answer must honor; the harness stamps it on the
@@ -116,7 +130,7 @@ class Worker:
                     action = monitor(StepInfo(worker=self.name, step=step, kind="llm", tokens=resp.input_tokens + resp.output_tokens))
                     if action != "continue":
                         return self._stop(action)
-                return resp.content.strip()
+                return _strip_fences(resp.content)
         return "(no final answer within max_steps)"
 
     def _stop(self, action: str) -> str:
@@ -135,11 +149,14 @@ class Worker:
                 semconv.GEN_AI_OPERATION_NAME: "chat",
                 semconv.GEN_AI_SYSTEM: self._provider.name,
                 semconv.GEN_AI_REQUEST_MODEL: getattr(self._provider, "model", "unknown"),
-                semconv.WATCHTOWER_CONTRACT: self.contract or "",
             },
         ) as span:
             try:
-                resp = self._provider.chat(messages, tools=tool_schemas, contract=self.contract)
+                # The contract is harness-level; asking the API for
+                # json_object output on tool-calling turns makes Gemini
+                # loop on tool calls (observed live), so the prompt
+                # carries the format request instead.
+                resp = self._provider.chat(messages, tools=tool_schemas)
             except Exception as exc:
                 # Provider failures are evidence, not crashes: mark the
                 # span errored (the status verifier catches it) and let
@@ -149,10 +166,13 @@ class Worker:
             span.set_attribute(semconv.GEN_AI_INPUT_TOKENS, str(resp.input_tokens))
             span.set_attribute(semconv.GEN_AI_OUTPUT_TOKENS, str(resp.output_tokens))
             span.set_attribute(semconv.GEN_AI_RESPONSE_MODEL, resp.model)
-            # Stamp the raw output while this span is still active: the
-            # schema verifier reads contract + output from the same span.
-            if self.contract and resp.content:
-                span.set_attribute(semconv.WATCHTOWER_OUTPUT, resp.content)
+            # The contract is a promise about the final structured
+            # output, so contract+output are stamped only on answer
+            # turns — a tool-call turn has no output to check.
+            if self.contract and resp.content and not resp.tool_calls:
+                output = _strip_fences(resp.content)
+                span.set_attribute(semconv.WATCHTOWER_CONTRACT, self.contract)
+                span.set_attribute(semconv.WATCHTOWER_OUTPUT, output)
             return resp
 
     def _exec_tool(self, tool_call: dict[str, Any], step: int) -> tuple[bool, str]:

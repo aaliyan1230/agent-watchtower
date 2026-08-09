@@ -22,6 +22,10 @@ from opentelemetry.sdk.trace import Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import set_tracer_provider
 
+# The SDK allows one global provider per process; experiments create a
+# telemetry per cell, so only the first sets it.
+_global_provider_set = False
+
 
 class HarnessTelemetry:
     """Owns the tracer used by workers and supervisor. BatchSpanProcessor
@@ -29,6 +33,7 @@ class HarnessTelemetry:
     the Go graph reconstructor expects (one trace per request)."""
 
     def __init__(self, endpoint: str, service_name: str = "harness"):
+        global _global_provider_set
         self._endpoint = endpoint.rstrip("/")
         # An explicit `endpoint` is used verbatim as the export URL (the
         # /v1/traces suffix is only appended for the env-var default),
@@ -37,7 +42,9 @@ class HarnessTelemetry:
         provider = TracerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
         self._processor = BatchSpanProcessor(self._exporter)
         provider.add_span_processor(self._processor)
-        set_tracer_provider(provider)
+        if not _global_provider_set:
+            set_tracer_provider(provider)
+            _global_provider_set = True
         self._tracer: Tracer = provider.get_tracer("watchtower.harness")
 
     def tracer(self) -> Tracer:

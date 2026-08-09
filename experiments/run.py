@@ -36,7 +36,12 @@ ADDR = "127.0.0.1:4318"
 LIVE_MODEL = "gemini-3.5-flash-lite"  # cheapest tier for the pilot
 
 # Which response step each fault corrupts in the canonical script
-# below ([0] tool turn, [1] final JSON answer).
+# below ([0] tool turn, [1] final JSON answer). Live mode uses
+# TOOL_FAULT_STEP for faults that inject tool calls: one corrupted turn
+# is enough for the policy/loop/budget verifiers, and repeated
+# corruption of every turn breaks the provider's conversation history.
+# Content faults corrupt every turn instead, because a real model's
+# answer turn number is not predictable.
 FAULT_STEP = {
     "malformed_json": 1,
     "schema_violation": 1,
@@ -45,8 +50,12 @@ FAULT_STEP = {
     "budget_blowout": 0,
     "provider_timeout": 0,
 }
+LIVE_CONTENT_FAULTS = {"malformed_json", "schema_violation"}
 
-SYSTEM_PROMPT = "You are a triage agent. Always answer in JSON matching the ticket contract."
+SYSTEM_PROMPT = (
+    "You are a triage agent. Call the search tool at most once, then answer "
+    'immediately with the ticket JSON: {"id": int, "title": string, "labels": [string]}.'
+)
 TOOLS = [Tool("search", "search the knowledge base", {"q": {"type": "string"}}, lambda q: f"results for {q}: ticket #42")]
 CONTRACT = "ticket"
 
@@ -76,8 +85,10 @@ class CellResult:
 def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]:
     spec = None
     if cell.fault:
-        step = None if live else FAULT_STEP[cell.fault]
-        spec = FaultSpec(FaultKind(cell.fault), seed=cell.seed, step=step)
+        if live and cell.fault in LIVE_CONTENT_FAULTS:
+            spec = FaultSpec(FaultKind(cell.fault), seed=cell.seed, step=None)
+        else:
+            spec = FaultSpec(FaultKind(cell.fault), seed=cell.seed, step=FAULT_STEP[cell.fault])
     provider: Provider
     if live:
         provider = GeminiProvider(model=LIVE_MODEL, api_key=get_api_key("GEMINI_API_KEY"))
@@ -115,12 +126,23 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("artifacts/results.json"))
     parser.add_argument("--live", action="store_true", help="real Gemini + LLM judge (needs GEMINI_API_KEY)")
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
+    parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
     args = parser.parse_args()
 
     if args.live and not get_api_key("GEMINI_API_KEY"):
         raise SystemExit("--live needs GEMINI_API_KEY in .env")
-    grid = json.loads(args.grid.read_text())
-    cells = [ExperimentCell(**c) for c in grid["cells"]]
+
+    if args.pilot:
+        cells = [
+            ExperimentCell(fault=fault, seed=seed, model="flash", run=1)
+            for fault in [None, *(f.value for f in FaultKind)]
+            for seed in [1, 2]
+        ]
+        grid_checksum = "pilot"
+    else:
+        grid = json.loads(args.grid.read_text())
+        cells = [ExperimentCell(**c) for c in grid["cells"]]
+        grid_checksum = grid["checksum"]
     if args.limit:
         cells = cells[: args.limit]
 
@@ -136,7 +158,7 @@ def main() -> None:
             results.append(res)
             print(f"[{i}/{len(cells)}] fault={cell.fault} seed={cell.seed} -> {res.verdict}")
         payload = {
-            "gridChecksum": grid["checksum"],
+            "gridChecksum": grid_checksum,
             "mode": "live" if args.live else "offline",
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cells": [asdict(r) for r in results],
