@@ -25,3 +25,6 @@ artifacts/
 
 # OS noise
 .DS_Store
+
+# node (diagram toolchain)
+scripts/diagrams/node_modules/

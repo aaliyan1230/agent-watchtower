@@ -1,8 +1,11 @@
-.PHONY: test vet serve demo venv experiment
+.PHONY: test vet serve demo live venv experiment experiment-live experiment-bedrock experiment-agreement diagrams
 
 test: ## go test -race + pytest
 	cd watchtower && go test ./... -race
 	.venv/bin/pytest tests -q
+
+diagrams: ## regenerate diagram PNGs from .excalidraw sources
+	./scripts/diagrams/export.sh
 
 vet: ## go vet ./...
 	cd watchtower && go vet ./...
