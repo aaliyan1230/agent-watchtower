@@ -13,9 +13,9 @@ from harness.faults import FaultKind
 from harness.telemetry import HarnessTelemetry
 
 
-def cell(fault, verdict="FAIL", judged=False, findings=None, budget=None):
+def cell(fault, verdict="FAIL", judged=False, findings=None, budget=None, seed=1):
     return {
-        "fault": fault, "seed": 1, "model": "flash", "run": 1,
+        "fault": fault, "seed": seed, "model": "flash", "run": 1,
         "verdict": verdict, "judged": judged,
         "findings": findings or [], "budget": budget or {"totalTokens": 100, "durationMs": 50},
     }
@@ -107,13 +107,13 @@ def test_judge_agreement_pairs_runs():
 
     a = [
         cell(None, verdict="PASS", judged=True, findings=[]),
-        cell("loop", judged=True, findings=[{"verifier": "judge"}]),
-        cell("loop", judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
+        cell("loop", seed=1, judged=True, findings=[{"verifier": "judge"}]),
+        cell("loop", seed=2, judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
     ]
     b = [
         cell(None, verdict="PASS", judged=True, findings=[]),
-        cell("loop", judged=True, findings=[]),
-        cell("loop", judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
+        cell("loop", seed=1, judged=True, findings=[]),
+        cell("loop", seed=2, judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
     ]
     kappa, n = judge_agreement(a, b)
     assert n == 3
