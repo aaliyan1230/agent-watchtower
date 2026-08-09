@@ -1,7 +1,9 @@
 // Package judge implements verify.Judge over an LLM: the optional,
 // calibrated supplement to the deterministic verifiers. The judge sees
 // the reconstructed run but NOT the deterministic findings — the
-// kappa/agreement analysis needs independent opinions.
+// kappa/agreement analysis needs independent opinions. The transport
+// is pluggable (Gemini OpenAI-compatible or Amazon Bedrock native) so
+// judge agreement can be measured across providers.
 package judge
 
 import (
@@ -9,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/bedrock"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/llm"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/verify"
@@ -16,15 +19,26 @@ import (
 
 const systemPrompt = `You are a runtime verifier for an agent run. Given the run summary, list concrete problems with the agent's behavior that are clearly visible in the evidence (failed tools, repeated actions, missing final answers, excessive resource use, suspicious outputs). Do not speculate about the task itself. Reply with JSON: {"issues": [{"severity": "warning"|"critical", "description": "..."}]}. Keep descriptions short and reference step numbers.`
 
+// chatClient is the one-method transport both providers implement.
+type chatClient interface {
+	ChatJSON(ctx context.Context, system, user string, out any) error
+}
+
 // LLM is a model-backed judge; model identity is carried on findings
 // so the experiments can compute per-model agreement (kappa).
 type LLM struct {
-	client *llm.Client
+	client chatClient
 	model  string
 }
 
+// New builds a judge over an OpenAI-compatible endpoint (Gemini).
 func New(model, apiKey, baseURL string) *LLM {
 	return &LLM{client: llm.New(model, apiKey, baseURL), model: model}
+}
+
+// NewBedrock builds a judge over Amazon Bedrock's native API.
+func NewBedrock(model, region string, creds bedrock.Credentials) *LLM {
+	return &LLM{client: bedrock.New(model, region, creds), model: model}
 }
 
 func (j *LLM) Name() string { return "judge" }

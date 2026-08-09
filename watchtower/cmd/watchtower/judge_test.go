@@ -72,3 +72,22 @@ func TestBuildJudgeRequiresKey(t *testing.T) {
 		t.Fatalf("disabled judge should be nil, got %v, %v", j, err)
 	}
 }
+
+func TestBuildJudgeBedrock(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AK")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "SK")
+	j, err := buildJudge(verify.Config{JudgeCfg: verify.JudgeConfig{Enabled: true, Backend: "bedrock"}})
+	if err != nil {
+		t.Fatalf("buildJudge: %v", err)
+	}
+	if j == nil {
+		t.Fatal("bedrock judge should be constructed")
+	}
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	if _, err := buildJudge(verify.Config{JudgeCfg: verify.JudgeConfig{Enabled: true, Backend: "bedrock"}}); err == nil {
+		t.Fatal("bedrock judge without creds must fail loudly")
+	}
+	if _, err := buildJudge(verify.Config{JudgeCfg: verify.JudgeConfig{Enabled: true, Backend: "nope"}}); err == nil {
+		t.Fatal("unknown backend must fail")
+	}
+}

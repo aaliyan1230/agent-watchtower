@@ -47,8 +47,9 @@ type Finding struct {
 // verify only carries the config.
 type JudgeConfig struct {
 	Enabled bool   `json:"enabled"`
+	Backend string `json:"backend"` // "" or "gemini" = OpenAI-compatible, "bedrock" = Amazon Bedrock
 	Model   string `json:"model"`   // empty = provider default
-	BaseURL string `json:"baseUrl"` // override for tests / alternate endpoints
+	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
 }
 
 // Config aggregates every verifier's configuration; zero values mean
