@@ -100,3 +100,23 @@ def test_build_workers_offline_script_shape():
         assert '"id": 1' in answer
     finally:
         telemetry.shutdown()
+
+
+def test_judge_agreement_pairs_runs():
+    from experiments.analyze import judge_agreement
+
+    a = [
+        cell(None, verdict="PASS", judged=True, findings=[]),
+        cell("loop", judged=True, findings=[{"verifier": "judge"}]),
+        cell("loop", judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
+    ]
+    b = [
+        cell(None, verdict="PASS", judged=True, findings=[]),
+        cell("loop", judged=True, findings=[]),
+        cell("loop", judged=True, findings=[{"verifier": "judge"}, {"verifier": "loop"}]),
+    ]
+    kappa, n = judge_agreement(a, b)
+    assert n == 3
+    assert kappa is not None
+    # a flags [F,T,T], b flags [F,F,T] -> po=2/3, p1=2/3, p2=1/3, pe=2/3*1/3+1/3*2/3=4/9
+    assert kappa == pytest.approx((2/3 - 4/9) / (1 - 4/9))

@@ -35,6 +35,25 @@ ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
 LIVE_MODEL = "gemini-3.5-flash-lite"  # cheapest tier for the pilot
 
+
+def aws_env() -> dict[str, str]:
+    """Forward the AWS CLI's active credentials to the spawned Go
+    server (the Bedrock judge signs with them). The CLI handles
+    profiles and session tokens that a config parser would miss."""
+    out = subprocess.run(
+        ["aws", "configure", "export-credentials", "--format", "env"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    env: dict[str, str] = {}
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export "):]
+        if "=" in line:
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip().strip('"')
+    return env
+
 # Which response step each fault corrupts in the canonical script
 # below ([0] tool turn, [1] final JSON answer). Live mode uses
 # TOOL_FAULT_STEP for faults that inject tool calls: one corrupted turn
@@ -127,10 +146,11 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="real Gemini + LLM judge (needs GEMINI_API_KEY)")
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
     parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
+    parser.add_argument("--judge", choices=["gemini", "bedrock"], default="gemini", help="judge backend for live mode")
     args = parser.parse_args()
 
-    if args.live and not get_api_key("GEMINI_API_KEY"):
-        raise SystemExit("--live needs GEMINI_API_KEY in .env")
+    if args.live and args.judge == "gemini" and not get_api_key("GEMINI_API_KEY"):
+        raise SystemExit("--live --judge gemini needs GEMINI_API_KEY in .env")
 
     if args.pilot:
         cells = [
@@ -146,8 +166,17 @@ def main() -> None:
     if args.limit:
         cells = cells[: args.limit]
 
-    config = str(REPO_ROOT / "watchtower" / "testdata" / ("experiment_live_config.json" if args.live else "experiment_config.json"))
-    env = {"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY")} if args.live else None
+    config_name = {
+        ("offline", "gemini"): "experiment_config.json",
+        ("live", "gemini"): "experiment_live_config.json",
+        ("live", "bedrock"): "experiment_live_bedrock_config.json",
+    }[("live" if args.live else "offline", args.judge)]
+    config = str(REPO_ROOT / "watchtower" / "testdata" / config_name)
+    env: dict[str, str] | None = None
+    if args.live:
+        env = {"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY") or ""}
+        if args.judge == "bedrock":
+            env = aws_env()
     proc = spawn_server(ENDPOINT, ADDR, config, env)
     try:
         results: list[CellResult] = []

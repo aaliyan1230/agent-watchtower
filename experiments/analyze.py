@@ -158,6 +158,24 @@ def judge_vs_deterministic(results: Sequence[Mapping]) -> tuple[float | None, in
     return cohen_kappa(det, jdg), len(judged)
 
 
+def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Kappa between two judges' opinions on the same runs, matched by
+    (fault, seed, run) — the inter-provider agreement metric (e.g.
+    Gemini judge vs Bedrock judge)."""
+    bmap = {(r["fault"], r["seed"], r["run"]): r for r in b}
+    a_flags: list[bool] = []
+    b_flags: list[bool] = []
+    for ra in a:
+        rb = bmap.get((ra["fault"], ra["seed"], ra["run"]))
+        if rb is None or not (ra.get("judged") and rb.get("judged")):
+            continue
+        a_flags.append(any(f["verifier"] == "judge" for f in ra["findings"]))
+        b_flags.append(any(f["verifier"] == "judge" for f in rb["findings"]))
+    if len(a_flags) < 2:
+        return None, len(a_flags)
+    return cohen_kappa(a_flags, b_flags), len(a_flags)
+
+
 def _pct(x: float) -> str:
     return f"{x:.0%}"
 
@@ -201,8 +219,16 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="analyze experiment results")
     parser.add_argument("--results", type=str, default="artifacts/results.json")
+    parser.add_argument("--compare", type=str, default="", help="second artifact; report kappa between the two judges")
     args = parser.parse_args()
-    print(render_table(load_results(args.results)["cells"]))
+    a = load_results(args.results)["cells"]
+    print(render_table(a))
+    if args.compare:
+        b = load_results(args.compare)["cells"]
+        kappa, n = judge_agreement(a, b)
+        line = f"judge A vs judge B agreement (n={n} paired judged runs): kappa={kappa:.2f}" if kappa is not None else f"judge A vs judge B: not enough paired judged runs (n={n})"
+        print()
+        print(line)
 
 
 if __name__ == "__main__":

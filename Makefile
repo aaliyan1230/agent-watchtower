@@ -28,3 +28,10 @@ experiment: ## offline matrix run + analysis (deterministic, free)
 experiment-live: ## small live stratified sample (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --out artifacts/results-live.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json
+
+experiment-bedrock: ## same pilot with the Bedrock (Nova) judge (needs AWS CLI creds)
+	.venv/bin/python -m experiments.run --live --pilot --judge bedrock --out artifacts/results-live-bedrock.json
+	.venv/bin/python -m experiments.analyze --results artifacts/results-live-bedrock.json
+
+experiment-agreement: ## inter-judge kappa across providers
+	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-bedrock.json

@@ -1,0 +1,16 @@
+{
+  "contracts": [
+    {
+      "name": "ticket",
+      "fields": {
+        "id": { "required": true, "type": "int" },
+        "title": { "required": true, "type": "string" },
+        "labels": { "required": false, "type": "array" }
+      }
+    }
+  ],
+  "policy": { "allowedTools": ["search"] },
+  "loop": { "enabled": true },
+  "limits": { "maxSteps": 8, "maxTotalTokens": 1500, "maxDurationMs": 60000 },
+  "judge": { "enabled": true, "backend": "bedrock", "model": "amazon.nova-lite-v1:0" }
+}
