@@ -16,6 +16,11 @@ from pathlib import Path
 
 from harness.faults import FaultKind
 
+# Frozen-protocol marker: bump when the experiment definition changes
+# (fault steps, scripts, configs) so old artifacts are never compared
+# silently against new ones.
+PROTOCOL_VERSION = "1"
+
 MODEL_VARIANTS = ["flash", "pro"]  # cheap tier for bulk, pro tier for a stratified sample
 SEEDS = [1, 2, 3, 4, 5]  # sized from pilot results in Phase 2
 RUNS_PER_CELL = 3
@@ -63,9 +68,13 @@ def main() -> None:
 
     cells = build_grid()
     args.out.mkdir(parents=True, exist_ok=True)
-    manifest = {"checksum": checksum(cells), "cells": [asdict(c) for c in cells]}
+    manifest = {
+        "protocolVersion": PROTOCOL_VERSION,
+        "checksum": checksum(cells),
+        "cells": [asdict(c) for c in cells],
+    }
     (args.out / "grid.json").write_text(json.dumps(manifest, indent=2))
-    print(f"grid: {len(cells)} cells, sha256 {manifest['checksum'][:12]} -> {args.out / 'grid.json'}")
+    print(f"grid: {len(cells)} cells, protocol {PROTOCOL_VERSION}, sha256 {manifest['checksum'][:12]} -> {args.out / 'grid.json'}")
 
 
 if __name__ == "__main__":

@@ -153,3 +153,44 @@ def test_aws_env_falls_back_to_cli_without_dotenv_creds(monkeypatch):
     env = run_mod.aws_env()
     assert env["AWS_ACCESS_KEY_ID"] == "AKIA_CLI"
     assert env["AWS_SECRET_ACCESS_KEY"] == "SECRET_CLI"
+
+
+def test_cells_signature_stable_and_sensitive():
+    from experiments.analyze import cells_signature
+
+    cells = [cell("loop", seed=1), cell(None, verdict="PASS")]
+    assert cells_signature(cells) == cells_signature(cells)
+    assert cells_signature(cells) != cells_signature(cells + [cell("loop", seed=2)])
+
+
+def test_verify_integrity():
+    from experiments.analyze import cells_signature, verify_integrity
+
+    artifact = {
+        "protocolVersion": "1",
+        "cellsSignature": cells_signature([cell("loop")]),
+        "cells": [cell("loop")],
+    }
+    assert verify_integrity(artifact) == "ok"
+    tampered = dict(artifact, cells=artifact["cells"] + [cell("loop", seed=9)])
+    assert "cellsSignature mismatch" in verify_integrity(tampered)
+    assert "unknown suite protocol" in verify_integrity(dict(artifact, protocolVersion="0.9"))
+
+
+def test_delta_pairs_and_diffs():
+    from experiments.analyze import delta
+
+    a = [
+        cell(None, verdict="PASS", seed=1),
+        cell("loop", verdict="FAIL", seed=1),
+        cell("loop", verdict="FAIL", seed=2),
+    ]
+    b = [
+        cell(None, verdict="FAIL", seed=1),
+        cell("loop", verdict="FAIL", seed=1),
+        cell("loop", verdict="FAIL", seed=2),
+    ]
+    d = delta(a, b)
+    assert d["pairedRuns"] == 3
+    assert d["loop"]["delta"] == 0.0
+    assert d["clean"]["fprA"] == 0.0 and d["clean"]["fprB"] == 1.0

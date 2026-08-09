@@ -162,11 +162,12 @@ def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float |
     """Kappa between two judges' opinions on the same runs, matched by
     (fault, seed, run) — the inter-provider agreement metric (e.g.
     Gemini judge vs Bedrock judge)."""
-    bmap = {(r["fault"], r["seed"], r["run"]): r for r in b}
+    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    bmap = {key(r): r for r in b}
     a_flags: list[bool] = []
     b_flags: list[bool] = []
     for ra in a:
-        rb = bmap.get((ra["fault"], ra["seed"], ra["run"]))
+        rb = bmap.get(key(ra))
         if rb is None or not (ra.get("judged") and rb.get("judged")):
             continue
         a_flags.append(any(f["verifier"] == "judge" for f in ra["findings"]))
@@ -178,6 +179,60 @@ def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float |
 
 def _pct(x: float) -> str:
     return f"{x:.0%}"
+
+
+def cells_signature(cells: Sequence[Mapping]) -> str:
+    """sha256 over the grid identity of the artifact's cells — the
+    self-integrity check: any truncation or tampering changes it."""
+    import hashlib
+
+    identity = [{"fault": r["fault"], "seed": r["seed"], "model": r["model"], "run": r["run"]} for r in cells]
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
+def verify_integrity(artifact: Mapping) -> str:
+    """Reports whether the artifact's cells match its recorded
+    signature, and whether the recorded protocol versions line up."""
+    problems = []
+    if cells_signature(artifact.get("cells", [])) != artifact.get("cellsSignature"):
+        problems.append("cellsSignature mismatch (artifact tampered or truncated)")
+    if artifact.get("protocolVersion") != "1":
+        problems.append(f"unknown suite protocol {artifact.get('protocolVersion')!r}")
+    return "; ".join(problems) or "ok"
+
+
+def delta(a: Sequence[Mapping], b: Sequence[Mapping]) -> dict:
+    """Compares two artifacts per fault: detection and false-positive
+    deltas plus judge-vs-deterministic kappa on each. Keys on the
+    (fault, seed, run) identity so only paired runs are compared."""
+    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    bmap = {key(r): r for r in b}
+    paired = [(ra, bmap[key(ra)]) for ra in a if key(ra) in bmap]
+    faults = sorted({ra["fault"] for ra, _ in paired if ra["fault"]})
+    out: dict = {"pairedRuns": len(paired)}
+    for fault in faults:
+        runs = [(ra, rb) for ra, rb in paired if ra["fault"] == fault]
+        det_a = sum(ra["verdict"] != "PASS" for ra, _ in runs) / len(runs)
+        det_b = sum(rb["verdict"] != "PASS" for _, rb in runs) / len(runs)
+        out[fault] = {"detA": det_a, "detB": det_b, "delta": det_b - det_a}
+    clean = [(ra, rb) for ra, rb in paired if ra["fault"] is None]
+    if clean:
+        fpr_a = sum(ra["verdict"] != "PASS" for ra, _ in clean) / len(clean)
+        fpr_b = sum(rb["verdict"] != "PASS" for _, rb in clean) / len(clean)
+        out["clean"] = {"fprA": fpr_a, "fprB": fpr_b, "delta": fpr_b - fpr_a}
+    return out
+
+
+def render_delta(d: Mapping) -> str:
+    lines = [f"delta report ({d['pairedRuns']} paired runs)"]
+    for key, row in sorted(d.items()):
+        if key == "pairedRuns":
+            continue
+        if key == "clean":
+            lines.append(f"  clean     fprA={row['fprA']:.0%} fprB={row['fprB']:.0%} delta={row['delta']:+.0%}")
+        else:
+            lines.append(f"  {key:<18} detA={row['detA']:.0%} detB={row['detB']:.0%} delta={row['delta']:+.0%}")
+    return "\n".join(lines)
 
 
 def render_table(results: Sequence[Mapping]) -> str:
@@ -220,8 +275,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="analyze experiment results")
     parser.add_argument("--results", type=str, default="artifacts/results.json")
     parser.add_argument("--compare", type=str, default="", help="second artifact; report kappa between the two judges")
+    parser.add_argument("--delta", type=str, default="", help="second artifact; report per-fault detection deltas")
+    parser.add_argument("--verify", action="store_true", help="check artifact integrity (signature, protocol)")
     args = parser.parse_args()
-    a = load_results(args.results)["cells"]
+    artifact = load_results(args.results)
+    a = artifact["cells"]
+    if args.verify:
+        print("integrity:", verify_integrity(artifact))
     print(render_table(a))
     if args.compare:
         b = load_results(args.compare)["cells"]
@@ -229,6 +289,9 @@ def main() -> None:
         line = f"judge A vs judge B agreement (n={n} paired judged runs): kappa={kappa:.2f}" if kappa is not None else f"judge A vs judge B: not enough paired judged runs (n={n})"
         print()
         print(line)
+    if args.delta:
+        print()
+        print(render_delta(delta(a, load_results(args.delta)["cells"])))
 
 
 if __name__ == "__main__":

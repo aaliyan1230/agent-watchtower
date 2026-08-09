@@ -30,7 +30,7 @@ from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
-from .suite import ExperimentCell
+from .suite import PROTOCOL_VERSION, ExperimentCell
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
@@ -111,6 +111,7 @@ class CellResult:
     budget: dict = field(default_factory=dict)
     answer: str = ""
     trace_id: str = ""
+    protocol: str = ""  # report protocolVersion, for artifact freezing
 
 
 def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]:
@@ -147,8 +148,27 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
         budget=report.get("budget", {}),
         answer=result.answers["worker-a"],
         trace_id=result.trace_id,
+        protocol=report.get("protocolVersion", ""),
         **base,
     )
+
+
+def file_checksum(path: str) -> str:
+    """sha256 of the verifier config — pins schema contracts, policy,
+    limits, and judge model into the artifact manifest."""
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def cells_signature(cells: list[ExperimentCell]) -> str:
+    """sha256 over the grid identity of executed cells — the artifact's
+    self-integrity check: any truncation or tampering changes it."""
+    import hashlib
+    import json as _json
+
+    identity = [{"fault": c.fault, "seed": c.seed, "model": c.model, "run": c.run} for c in cells]
+    return hashlib.sha256(_json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
 def main() -> None:
@@ -199,8 +219,13 @@ def main() -> None:
             results.append(res)
             print(f"[{i}/{len(cells)}] fault={cell.fault} seed={cell.seed} -> {res.verdict}")
         payload = {
+            "protocolVersion": PROTOCOL_VERSION,
             "gridChecksum": grid_checksum,
+            "configChecksum": file_checksum(config),
+            "cellsSignature": cells_signature(cells),
+            "reportProtocolVersion": results[0].protocol,
             "mode": "live" if args.live else "offline",
+            "judgeBackend": args.judge,
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cells": [asdict(r) for r in results],
         }

@@ -12,6 +12,12 @@ import (
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/verify"
 )
 
+// ProtocolVersion freezes the verdict semantics: verdict mapping,
+// finding schema, budget fields. Bump it when any of those change —
+// artifacts carry it so results from different protocol versions are
+// never compared silently.
+const ProtocolVersion = "0.6"
+
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
 
@@ -31,26 +37,28 @@ type VerifierSummary struct {
 
 // Report is the complete evidence bundle for one run.
 type Report struct {
-	TraceID     string            `json:"traceId"`
-	RootSpanID  string            `json:"rootSpanId"`
-	Verdict     Verdict           `json:"verdict"`
-	Judged      bool              `json:"judged"`
-	Findings    []verify.Finding  `json:"findings,omitempty"`
-	Verifiers   []VerifierSummary `json:"verifiers"`
-	Budget      graph.Budget      `json:"budget"`
-	GeneratedAt time.Time         `json:"generatedAt"`
+	ProtocolVersion string            `json:"protocolVersion"`
+	TraceID         string            `json:"traceId"`
+	RootSpanID      string            `json:"rootSpanId"`
+	Verdict         Verdict           `json:"verdict"`
+	Judged          bool              `json:"judged"`
+	Findings        []verify.Finding  `json:"findings,omitempty"`
+	Verifiers       []VerifierSummary `json:"verifiers"`
+	Budget          graph.Budget      `json:"budget"`
+	GeneratedAt     time.Time         `json:"generatedAt"`
 }
 
 // Build assembles a Report from a reconstructed run and its findings.
 func Build(run *graph.Run, findings []verify.Finding, judged bool) *Report {
 	r := &Report{
-		TraceID:     run.TraceID,
-		RootSpanID:  run.RootSpanID,
-		Verdict:     verdictFor(findings),
-		Judged:      judged,
-		Findings:    findings,
-		Budget:      run.Budget,
-		GeneratedAt: time.Now().UTC(),
+		ProtocolVersion: ProtocolVersion,
+		TraceID:         run.TraceID,
+		RootSpanID:      run.RootSpanID,
+		Verdict:         verdictFor(findings),
+		Judged:          judged,
+		Findings:        findings,
+		Budget:          run.Budget,
+		GeneratedAt:     time.Now().UTC(),
 	}
 	r.Verifiers = summarize(findings, judged)
 	return r
