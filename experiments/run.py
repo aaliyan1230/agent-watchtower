@@ -38,9 +38,18 @@ LIVE_MODEL = "gemini-3.5-flash-lite"  # cheapest tier for the pilot
 
 
 def aws_env() -> dict[str, str]:
-    """Forward the AWS CLI's active credentials to the spawned Go
-    server (the Bedrock judge signs with them). The CLI handles
-    profiles and session tokens that a config parser would miss."""
+    """AWS creds for the spawned Go server (the Bedrock judge signs
+    with them). .env wins when both key+secret are set there; otherwise
+    the AWS CLI session is forwarded (aws configure export-credentials
+    handles profiles and session tokens)."""
+    from_env = {
+        "AWS_ACCESS_KEY_ID": get_api_key("AWS_ACCESS_KEY_ID") or "",
+        "AWS_SECRET_ACCESS_KEY": get_api_key("AWS_SECRET_ACCESS_KEY") or "",
+        "AWS_SESSION_TOKEN": get_api_key("AWS_SESSION_TOKEN") or "",
+        "AWS_REGION": get_api_key("AWS_REGION") or "",
+    }
+    if from_env["AWS_ACCESS_KEY_ID"] and from_env["AWS_SECRET_ACCESS_KEY"]:
+        return {k: v for k, v in from_env.items() if v}
     out = subprocess.run(
         ["aws", "configure", "export-credentials", "--format", "env"],
         capture_output=True, text=True, check=True,
@@ -53,6 +62,8 @@ def aws_env() -> dict[str, str]:
         if "=" in line:
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip().strip('"')
+    if region := from_env["AWS_REGION"]:
+        env["AWS_REGION"] = region
     return env
 
 # Which response step each fault corrupts in the canonical script

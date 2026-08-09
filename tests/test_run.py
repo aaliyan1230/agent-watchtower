@@ -120,3 +120,36 @@ def test_judge_agreement_pairs_runs():
     assert kappa is not None
     # a flags [F,T,T], b flags [F,F,T] -> po=2/3, p1=2/3, p2=1/3, pe=2/3*1/3+1/3*2/3=4/9
     assert kappa == pytest.approx((2/3 - 4/9) / (1 - 4/9))
+
+
+def test_aws_env_prefers_dotenv_creds(monkeypatch):
+    from experiments import run as run_mod
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIA_FROM_ENV")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "SECRET_FROM_ENV")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+
+    def no_cli(*args, **kwargs):
+        raise AssertionError("CLI must not be called when .env has creds")
+
+    monkeypatch.setattr(run_mod.subprocess, "run", no_cli)
+    env = run_mod.aws_env()
+    assert env["AWS_ACCESS_KEY_ID"] == "AKIA_FROM_ENV"
+    assert env["AWS_SECRET_ACCESS_KEY"] == "SECRET_FROM_ENV"
+    assert env["AWS_REGION"] == "eu-west-1"
+    assert "AWS_SESSION_TOKEN" not in env  # absent vars stay absent
+
+
+def test_aws_env_falls_back_to_cli_without_dotenv_creds(monkeypatch):
+    from experiments import run as run_mod
+
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+
+    def fake_cli(*args, **kwargs):
+        return type("R", (), {"stdout": "export AWS_ACCESS_KEY_ID=AKIA_CLI\nexport AWS_SECRET_ACCESS_KEY=SECRET_CLI\n"})()
+
+    monkeypatch.setattr(run_mod.subprocess, "run", fake_cli)
+    env = run_mod.aws_env()
+    assert env["AWS_ACCESS_KEY_ID"] == "AKIA_CLI"
+    assert env["AWS_SECRET_ACCESS_KEY"] == "SECRET_CLI"
