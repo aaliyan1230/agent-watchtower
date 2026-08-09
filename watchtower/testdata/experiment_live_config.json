@@ -11,6 +11,6 @@
   ],
   "policy": { "allowedTools": ["search"] },
   "loop": { "enabled": true },
-  "limits": { "maxSteps": 8, "maxTotalTokens": 300, "maxDurationMs": 60000 },
+  "limits": { "maxSteps": 8, "maxTotalTokens": 1500, "maxDurationMs": 60000 },
   "judge": { "enabled": true, "model": "gemini-3.6-flash" }
 }
