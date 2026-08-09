@@ -27,7 +27,13 @@ type Client struct {
 	baseURL string
 	model   string
 	http    *http.Client
+	lastIn  int64
+	lastOut int64
 }
+
+// LastUsage reports the token usage of the most recent ChatText call —
+// judge cost is a paper metric, so it is measured, not estimated.
+func (c *Client) LastUsage() (int64, int64) { return c.lastIn, c.lastOut }
 
 func New(model, apiKey, baseURL string) *Client {
 	if baseURL == "" {
@@ -83,6 +89,10 @@ func (c *Client) ChatText(ctx context.Context, system, user string) (string, err
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return "", fmt.Errorf("llm: decode response: %w", err)
@@ -90,6 +100,7 @@ func (c *Client) ChatText(ctx context.Context, system, user string) (string, err
 	if len(decoded.Choices) == 0 {
 		return "", fmt.Errorf("llm: no choices in response")
 	}
+	c.lastIn, c.lastOut = decoded.Usage.PromptTokens, decoded.Usage.CompletionTokens
 	return decoded.Choices[0].Message.Content, nil
 }
 

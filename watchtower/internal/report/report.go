@@ -35,6 +35,13 @@ type VerifierSummary struct {
 	MaxSeverity verify.Severity `json:"maxSeverity"`
 }
 
+// JudgeUsage is the measured token cost of the judge pass — the
+// "judge is an expensive supplement" claim needs numbers.
+type JudgeUsage struct {
+	InputTokens  int64 `json:"inputTokens"`
+	OutputTokens int64 `json:"outputTokens"`
+}
+
 // Report is the complete evidence bundle for one run.
 type Report struct {
 	ProtocolVersion string            `json:"protocolVersion"`
@@ -42,6 +49,7 @@ type Report struct {
 	RootSpanID      string            `json:"rootSpanId"`
 	Verdict         Verdict           `json:"verdict"`
 	Judged          bool              `json:"judged"`
+	JudgeUsage      JudgeUsage        `json:"judgeUsage,omitempty"`
 	Findings        []verify.Finding  `json:"findings,omitempty"`
 	Verifiers       []VerifierSummary `json:"verifiers"`
 	Budget          graph.Budget      `json:"budget"`
@@ -62,6 +70,11 @@ func Build(run *graph.Run, findings []verify.Finding, judged bool) *Report {
 	}
 	r.Verifiers = summarize(findings, judged)
 	return r
+}
+
+// SetJudgeUsage records the measured judge cost for a judged run.
+func (r *Report) SetJudgeUsage(input, output int64) {
+	r.JudgeUsage = JudgeUsage{InputTokens: input, OutputTokens: output}
 }
 
 // verdictFor maps findings to a verdict: critical -> FAIL,

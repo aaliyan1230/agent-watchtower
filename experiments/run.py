@@ -112,6 +112,7 @@ class CellResult:
     answer: str = ""
     trace_id: str = ""
     protocol: str = ""  # report protocolVersion, for artifact freezing
+    judge_usage: dict = field(default_factory=dict)  # measured judge tokens
 
 
 def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]:
@@ -149,6 +150,7 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
         answer=result.answers["worker-a"],
         trace_id=result.trace_id,
         protocol=report.get("protocolVersion", ""),
+        judge_usage=report.get("judgeUsage", {}),
         **base,
     )
 
@@ -178,7 +180,7 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="real Gemini + LLM judge (needs GEMINI_API_KEY)")
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
     parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
-    parser.add_argument("--judge", choices=["gemini", "bedrock"], default="gemini", help="judge backend for live mode")
+    parser.add_argument("--judge", choices=["gemini", "bedrock", "kimi"], default="gemini", help="judge backend for live mode")
     args = parser.parse_args()
 
     if args.live and args.judge == "gemini" and not get_api_key("GEMINI_API_KEY"):
@@ -202,6 +204,7 @@ def main() -> None:
         ("offline", "gemini"): "experiment_config.json",
         ("live", "gemini"): "experiment_live_config.json",
         ("live", "bedrock"): "experiment_live_bedrock_config.json",
+        ("live", "kimi"): "experiment_live_kimi_config.json",
     }[("live" if args.live else "offline", args.judge)]
     config = str(REPO_ROOT / "watchtower" / "testdata" / config_name)
     env: dict[str, str] | None = None

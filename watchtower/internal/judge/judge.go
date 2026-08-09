@@ -28,8 +28,10 @@ type chatClient interface {
 // LLM is a model-backed judge; model identity is carried on findings
 // so the experiments can compute per-model agreement (kappa).
 type LLM struct {
-	client chatClient
-	model  string
+	client  chatClient
+	model   string
+	lastIn  int64
+	lastOut int64
 }
 
 // New builds a judge over an OpenAI-compatible endpoint (Gemini).
@@ -44,6 +46,10 @@ func NewBedrock(model, region string, creds bedrock.Credentials) *LLM {
 
 func (j *LLM) Name() string { return "judge" }
 
+// Usage reports the token usage of the most recent Run, read from the
+// transport's own usage accounting.
+func (j *LLM) Usage() (int64, int64) { return j.lastIn, j.lastOut }
+
 func (j *LLM) Run(run *graph.Run) ([]verify.Finding, error) {
 	var resp struct {
 		Issues []struct {
@@ -54,6 +60,9 @@ func (j *LLM) Run(run *graph.Run) ([]verify.Finding, error) {
 	text, err := j.client.ChatText(context.Background(), systemPrompt, summarizeRun(run))
 	if err != nil {
 		return nil, err
+	}
+	if u, ok := j.client.(interface{ LastUsage() (int64, int64) }); ok {
+		j.lastIn, j.lastOut = u.LastUsage()
 	}
 	if err := json.Unmarshal([]byte(stripFences(text)), &resp); err != nil {
 		return nil, fmt.Errorf("judge: model returned invalid JSON: %w", err)

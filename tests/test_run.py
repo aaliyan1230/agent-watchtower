@@ -194,3 +194,46 @@ def test_delta_pairs_and_diffs():
     assert d["pairedRuns"] == 3
     assert d["loop"]["delta"] == 0.0
     assert d["clean"]["fprA"] == 0.0 and d["clean"]["fprB"] == 1.0
+
+
+def test_percentile_nearest_rank():
+    from experiments.analyze import _percentile
+
+    vals = [1, 2, 3, 4, 5]
+    assert _percentile(vals, 50) == 3
+    assert _percentile(vals, 99) == 5
+    assert _percentile([], 50) == 0.0
+
+
+def test_judge_cost_summary_uses_measured_usage():
+    from experiments.analyze import judge_cost_summary
+
+    results = [
+        cell("loop", judged=True, findings=[{"verifier": "judge", "source": "gemini-3.6-flash"}], budget={}),
+    ]
+    results[0]["judge_usage"] = {"inputTokens": 1000, "outputTokens": 500}
+    out = judge_cost_summary(results)
+    assert out["gemini-3.6-flash"]["judgedRuns"] == 1
+    assert out["gemini-3.6-flash"]["meanInputTokens"] == 1000
+    # (1000*1.5 + 500*7.5) / 1e6
+    assert out["gemini-3.6-flash"]["estUsdPerRun"] == pytest.approx(0.00525)
+
+
+def test_judge_agreement_matrix_with_consensus():
+    from experiments.analyze import judge_agreement_matrix
+
+    def make(flags):
+        return [cell("loop", seed=i, judged=True, findings=[{"verifier": "judge"}] if f else []) for i, f in enumerate(flags)]
+
+    a = make([True, True, False])
+    b = make([True, True, False])
+    c = make([True, False, True])
+    matrix, n = judge_agreement_matrix([("a", a), ("b", b), ("c", c)])
+    assert n == 3
+    assert matrix["a"]["b"] == pytest.approx(1.0)
+    assert matrix["a"]["c"] == pytest.approx(-0.5)
+    # consensus = majority per run = [T, T, F]; a agrees fully
+    assert matrix["a"]["consensus"] == pytest.approx(1.0)
+    assert matrix["b"]["consensus"] == pytest.approx(1.0)
+    # c = [T, F, T] vs [T, T, F]: po=1/3, p1(c)=2/3, p2=2/3 -> pe=4/9+1/9=5/9
+    assert matrix["c"]["consensus"] == pytest.approx((1/3 - 5/9) / (1 - 5/9))

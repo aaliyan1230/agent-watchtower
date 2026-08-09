@@ -52,6 +52,10 @@ func newServeMux(cfg verify.Config, store *report.Store) http.Handler {
 			return nil, fmt.Errorf("reconstruct: %w", err)
 		}
 		r := report.Build(run, verify.Verify(run, cfg), cfg.Judge != nil)
+		if cfg.Judge != nil {
+			in, out := cfg.Judge.Usage()
+			r.SetJudgeUsage(in, out)
+		}
 		store.Put(r.TraceID, r)
 		log.Printf("trace %s: %s (%d findings)", r.TraceID, r.Verdict, len(r.Findings))
 		return json.Marshal(r)

@@ -131,17 +131,72 @@ def fault_coverage(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
     return out
 
 
+def _percentile(values: Sequence[float], p: float) -> float:
+    """Nearest-rank percentile: p in [0, 100]. The overhead numbers the
+    paper reports are p50/p99, not means — one outlier run should not
+    own the story."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, int(p / 100 * len(ordered))))
+    return ordered[idx]
+
+
 def overhead_summary(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
-    """Mean tokens and wall-clock duration per fault group — the
-    overhead the paper reports (cost is per-token, so tokens are the
-    honest proxy without live pricing)."""
+    """Tokens and wall-clock duration per fault group: mean plus p50/p99
+    — the overhead the paper reports (cost is per-token, so tokens are
+    the honest proxy without live pricing)."""
     groups = sorted({r["fault"] or "clean" for r in results})
     out: dict[str, dict[str, float]] = {}
     for group in groups:
         runs = [r for r in results if (r["fault"] or "clean") == group]
-        tokens = [r["budget"].get("totalTokens", 0) for r in runs]
-        duration = [r["budget"].get("durationMs", 0) for r in runs]
-        out[group] = {"meanTokens": sum(tokens) / len(tokens), "meanDurationMs": sum(duration) / len(duration)}
+        tokens = [float(r["budget"].get("totalTokens", 0)) for r in runs]
+        duration = [float(r["budget"].get("durationMs", 0)) for r in runs]
+        out[group] = {
+            "meanTokens": sum(tokens) / len(tokens),
+            "p50Tokens": _percentile(tokens, 50),
+            "p99Tokens": _percentile(tokens, 99),
+            "meanDurationMs": sum(duration) / len(duration),
+            "p50DurationMs": _percentile(duration, 50),
+            "p99DurationMs": _percentile(duration, 99),
+        }
+    return out
+
+
+# List prices per 1M tokens (USD), used to turn measured judge usage
+# into an estimated cost. Kept here so the estimate is auditable.
+MODEL_PRICES = {
+    "gemini-3.6-flash": (1.50, 7.50),
+    "gemini-3.5-flash-lite": (0.30, 2.50),
+    "deepseek.v3.2": (0.28, 0.42),
+    "moonshotai.kimi-k2.5": (0.60, 2.50),
+}
+
+
+def judge_cost_summary(results: Sequence[Mapping]) -> dict:
+    """Measured judge usage per model: mean tokens per judged run and
+    the estimated cost (list prices). Judge cost is a paper metric, so
+    it comes from the report's judgeUsage, not from guessing."""
+    used: dict[str, list[tuple[int, int]]] = {}
+    for r in results:
+        usage = r.get("judge_usage") or {}
+        if not usage:
+            continue
+        model = next((f.get("source", "") for f in r.get("findings", []) if f.get("verifier") == "judge"), "unknown")
+        used.setdefault(model, []).append((usage.get("inputTokens", 0), usage.get("outputTokens", 0)))
+    out: dict[str, dict] = {}
+    for model, samples in used.items():
+        n = len(samples)
+        in_t = sum(s[0] for s in samples) / n
+        out_t = sum(s[1] for s in samples) / n
+        price = MODEL_PRICES.get(model, (0.0, 0.0))
+        out[model] = {
+            "judgedRuns": n,
+            "meanInputTokens": in_t,
+            "meanOutputTokens": out_t,
+            "estUsdPerRun": (in_t * price[0] + out_t * price[1]) / 1e6,
+            "estUsdTotal": (sum(s[0] for s in samples) * price[0] + sum(s[1] for s in samples) * price[1]) / 1e6,
+        }
     return out
 
 
@@ -175,6 +230,46 @@ def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float |
     if len(a_flags) < 2:
         return None, len(a_flags)
     return cohen_kappa(a_flags, b_flags), len(a_flags)
+
+
+def judge_agreement_matrix(named: Sequence[tuple[str, Sequence[Mapping]]]) -> tuple[dict, int]:
+    """Pairwise judge kappa plus each judge's agreement with the
+    majority consensus (judge_consensus), over runs all judges saw.
+    The 3-way inter-judge consistency table for the paper."""
+    names = [n for n, _ in named]
+    cells = [cells for _, cells in named]
+    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    common = set(key(r) for r in cells[0])
+    for c in cells[1:]:
+        common &= {key(r) for r in c}
+    flags = {
+        name: [any(f["verifier"] == "judge" for f in next(r for r in c if key(r) == k)["findings"]) for k in sorted(common)]
+        for name, c in zip(names, cells)
+    }
+    consensus = judge_consensus([flags[n] for n in names])
+    out: dict[str, dict[str, float]] = {n: {"consensus": cohen_kappa(flags[n], consensus)} for n in names}
+    for i, a in enumerate(names):
+        for j, b in enumerate(names):
+            if i < j:
+                k = cohen_kappa(flags[a], flags[b])
+                out[a][b] = k
+                out[b][a] = k
+    return out, len(common)
+
+
+def render_agreement(matrix: dict, n: int) -> str:
+    names = list(matrix)
+    lines = [f"judge agreement matrix ({n} paired judged runs)"]
+    header = f"{'':<14}" + "".join(f"{n:>12}" for n in names) + f"{'consensus':>12}"
+    lines.append(header)
+    for a in names:
+        row = f"{a:<14}"
+        for b in names:
+            v = matrix[a].get(b)
+            row += f"{v:>12.2f}" if v is not None else f"{'-':>12}"
+        row += f"{matrix[a]['consensus']:>12.2f}"
+        lines.append(row)
+    return "\n".join(lines)
 
 
 def _pct(x: float) -> str:
@@ -259,9 +354,22 @@ def render_table(results: Sequence[Mapping]) -> str:
         line = f"{fault:<18}" + "".join(f"{_pct(row.get(v, 0.0)):>10}" for v in verifiers) + f"{_pct(detected):>10}"
         lines.append(line)
     lines.append("")
-    lines.append("overhead (mean per run)")
+    lines.append("overhead (per run, tokens / ms)")
     for group, stats in overhead_summary(cells).items():
-        lines.append(f"  {group:<18} tokens={stats['meanTokens']:>6.0f}  duration={stats['meanDurationMs']:>6.0f}ms")
+        lines.append(
+            f"  {group:<18} tokens p50={stats['p50Tokens']:>6.0f} p99={stats['p99Tokens']:>7.0f} "
+            f"duration p50={stats['p50DurationMs']:>5.0f}ms p99={stats['p99DurationMs']:>6.0f}ms"
+        )
+    judge_cost = judge_cost_summary(cells)
+    if judge_cost:
+        lines.append("")
+        lines.append("judge cost (measured usage, est. at list prices)")
+        for model, stats in judge_cost.items():
+            lines.append(
+                f"  {model:<22} runs={stats['judgedRuns']:>4} "
+                f"in={stats['meanInputTokens']:>6.0f} out={stats['meanOutputTokens']:>6.0f} "
+                f"~${stats['estUsdPerRun']:.4f}/run total ~${stats['estUsdTotal']:.4f}"
+            )
     kappa, n_judged = judge_vs_deterministic(cells)
     if kappa is not None:
         lines.append("")
@@ -274,7 +382,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="analyze experiment results")
     parser.add_argument("--results", type=str, default="artifacts/results.json")
-    parser.add_argument("--compare", type=str, default="", help="second artifact; report kappa between the two judges")
+    parser.add_argument("--compare", type=str, action="append", default=[], help="additional artifacts; pairwise judge kappa + consensus")
     parser.add_argument("--delta", type=str, default="", help="second artifact; report per-fault detection deltas")
     parser.add_argument("--verify", action="store_true", help="check artifact integrity (signature, protocol)")
     args = parser.parse_args()
@@ -284,11 +392,10 @@ def main() -> None:
         print("integrity:", verify_integrity(artifact))
     print(render_table(a))
     if args.compare:
-        b = load_results(args.compare)["cells"]
-        kappa, n = judge_agreement(a, b)
-        line = f"judge A vs judge B agreement (n={n} paired judged runs): kappa={kappa:.2f}" if kappa is not None else f"judge A vs judge B: not enough paired judged runs (n={n})"
+        named = [("artifact0", a)] + [(f"artifact{i}", load_results(p)["cells"]) for i, p in enumerate(args.compare, start=1)]
+        matrix, n = judge_agreement_matrix(named)
         print()
-        print(line)
+        print(render_agreement(matrix, n))
     if args.delta:
         print()
         print(render_delta(delta(a, load_results(args.delta)["cells"])))

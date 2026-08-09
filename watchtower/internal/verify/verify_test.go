@@ -19,6 +19,7 @@ func (s stubJudge) Run(*graph.Run) ([]Finding, error) {
 	}
 	return []Finding{{Verifier: s.name, Severity: SeverityWarning, Message: "judge disagrees"}}, nil
 }
+func (s stubJudge) Usage() (int64, int64) { return 10, 20 }
 
 // contains reports whether a string contains a substring — the test
 // suite's tiny helper so table expectations stay readable.

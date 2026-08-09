@@ -34,4 +34,4 @@ experiment-bedrock: ## same pilot with the Bedrock (Nova) judge (needs AWS CLI c
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live-bedrock.json
 
 experiment-agreement: ## inter-judge kappa across providers
-	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-bedrock.json
+	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-bedrock.json --compare artifacts/results-live-kimi.json

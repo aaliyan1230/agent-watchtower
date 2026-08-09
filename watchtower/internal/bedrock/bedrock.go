@@ -52,7 +52,13 @@ type Client struct {
 	creds   Credentials
 	http    *http.Client
 	baseURL string
+	lastIn  int64
+	lastOut int64
 }
+
+// LastUsage reports the token usage of the most recent ChatText call —
+// judge cost is a paper metric, so it is measured, not estimated.
+func (c *Client) LastUsage() (int64, int64) { return c.lastIn, c.lastOut }
 
 func New(model, region string, creds Credentials) *Client {
 	return &Client{
@@ -110,6 +116,10 @@ func (c *Client) parseResponse(raw []byte) (string, error) {
 					} `json:"content"`
 				} `json:"message"`
 			} `json:"output"`
+			Usage struct {
+				InputTokens  int64 `json:"inputTokens"`
+				OutputTokens int64 `json:"outputTokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			return "", fmt.Errorf("bedrock: decode response: %w", err)
@@ -121,6 +131,7 @@ func (c *Client) parseResponse(raw []byte) (string, error) {
 		if text == "" {
 			return "", fmt.Errorf("bedrock: empty response from %s", c.model)
 		}
+		c.lastIn, c.lastOut = decoded.Usage.InputTokens, decoded.Usage.OutputTokens
 		return text, nil
 	}
 	var decoded struct {
@@ -129,6 +140,10 @@ func (c *Client) parseResponse(raw []byte) (string, error) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int64 `json:"prompt_tokens"`
+			CompletionTokens int64 `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return "", fmt.Errorf("bedrock: decode response: %w", err)
@@ -136,6 +151,7 @@ func (c *Client) parseResponse(raw []byte) (string, error) {
 	if len(decoded.Choices) == 0 || decoded.Choices[0].Message.Content == "" {
 		return "", fmt.Errorf("bedrock: empty response from %s", c.model)
 	}
+	c.lastIn, c.lastOut = decoded.Usage.PromptTokens, decoded.Usage.CompletionTokens
 	return decoded.Choices[0].Message.Content, nil
 }
 
