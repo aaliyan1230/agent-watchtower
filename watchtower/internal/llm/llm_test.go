@@ -26,8 +26,12 @@ func TestChatJSONRoundTrip(t *testing.T) {
 	var out struct {
 		Verdict string `json:"verdict"`
 	}
-	if err := c.ChatJSON(context.Background(), "sys", "user", &out); err != nil {
-		t.Fatalf("ChatJSON: %v", err)
+	text, err := c.ChatText(context.Background(), "sys", "user")
+	if err != nil {
+		t.Fatalf("ChatText: %v", err)
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("parse: %v", err)
 	}
 	if out.Verdict != "fail" {
 		t.Fatalf("verdict = %q", out.Verdict)
@@ -53,7 +57,7 @@ func TestChatJSONErrors(t *testing.T) {
 	}{
 		{name: "server error", status: 500, body: `{"error":"boom"}`, want: "500"},
 		{name: "empty choices", status: 200, body: `{"choices":[]}`, want: "no choices"},
-		{name: "model json garbage", status: 200, body: `{"choices":[{"message":{"content":"not json"}}]}`, want: "invalid JSON"},
+
 		{name: "response not json", status: 200, body: `oops`, want: "decode response"},
 	}
 	for _, tt := range tests {
@@ -64,8 +68,7 @@ func TestChatJSONErrors(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := New("m", "k", srv.URL)
-			var out map[string]any
-			err := c.ChatJSON(context.Background(), "s", "u", &out)
+			_, err := c.ChatText(context.Background(), "s", "u")
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}

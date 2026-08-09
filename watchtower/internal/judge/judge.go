@@ -8,6 +8,7 @@ package judge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -21,7 +22,7 @@ const systemPrompt = `You are a runtime verifier for an agent run. Given the run
 
 // chatClient is the one-method transport both providers implement.
 type chatClient interface {
-	ChatJSON(ctx context.Context, system, user string, out any) error
+	ChatText(ctx context.Context, system, user string) (string, error)
 }
 
 // LLM is a model-backed judge; model identity is carried on findings
@@ -50,8 +51,12 @@ func (j *LLM) Run(run *graph.Run) ([]verify.Finding, error) {
 			Description string `json:"description"`
 		} `json:"issues"`
 	}
-	if err := j.client.ChatJSON(context.Background(), systemPrompt, summarizeRun(run), &resp); err != nil {
+	text, err := j.client.ChatText(context.Background(), systemPrompt, summarizeRun(run))
+	if err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(stripFences(text)), &resp); err != nil {
+		return nil, fmt.Errorf("judge: model returned invalid JSON: %w", err)
 	}
 	var out []verify.Finding
 	for _, is := range resp.Issues {
@@ -67,6 +72,25 @@ func (j *LLM) Run(run *graph.Run) ([]verify.Finding, error) {
 		})
 	}
 	return out, nil
+}
+
+// stripFences removes markdown code fences around the model's JSON:
+// both Gemini and Nova wrap their JSON answers in ```json blocks.
+func stripFences(text string) string {
+	s := strings.TrimSpace(text)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	// The fence line may carry a language tag ("```json"); drop the
+	// whole line either way.
+	if strings.HasPrefix(lines[0], "```") {
+		lines = lines[1:]
+	}
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "```" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // summarizeRun renders the run as compact evidence: one line per step

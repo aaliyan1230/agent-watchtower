@@ -21,23 +21,33 @@ func testClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Serv
 
 func TestChatJSONRequestShape(t *testing.T) {
 	var gotBody map[string]any
-	var authHeader, dateHeader string
+	var authHeader, dateHeader, requestURI string
 	c, srv := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		authHeader = r.Header.Get("Authorization")
 		dateHeader = r.Header.Get("X-Amz-Date")
+		requestURI = r.RequestURI
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{"output":{"message":{"content":[{"text":"{\"verdict\":\"ok\"}"}]}}}`))
 	})
 	defer srv.Close()
 
+	text, err := c.ChatText(context.Background(), "sys", "user")
+	if err != nil {
+		t.Fatalf("ChatText: %v", err)
+	}
 	var out struct {
 		Verdict string `json:"verdict"`
 	}
-	if err := c.ChatJSON(context.Background(), "sys", "user", &out); err != nil {
-		t.Fatalf("ChatJSON: %v", err)
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("parse: %v", err)
 	}
 	if out.Verdict != "ok" {
 		t.Fatalf("verdict = %q", out.Verdict)
+	}
+	// The wire path carries the literal colon; the signed canonical
+	// URI (inside the signature) percent-encodes it.
+	if requestURI != "/model/amazon.nova-lite-v1:0/invoke" {
+		t.Errorf("request URI = %q", requestURI)
 	}
 	if !strings.HasPrefix(authHeader, "AWS4-HMAC-SHA256 Credential=AKID/") {
 		t.Errorf("authorization = %q", authHeader)
@@ -73,7 +83,6 @@ func TestChatJSONErrors(t *testing.T) {
 	}{
 		{name: "server error", status: 500, body: `{"message":"boom"}`, want: "500"},
 		{name: "empty response", status: 200, body: `{"output":{"message":{"content":[]}}}`, want: "empty response"},
-		{name: "model json garbage", status: 200, body: `{"output":{"message":{"content":[{"text":"nope"}]}}}`, want: "invalid JSON"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,8 +91,7 @@ func TestChatJSONErrors(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			})
 			defer srv.Close()
-			var out map[string]any
-			err := c.ChatJSON(context.Background(), "s", "u", &out)
+			_, err := c.ChatText(context.Background(), "s", "u")
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}

@@ -78,3 +78,17 @@ func TestSummarizeRunMentionsEvidence(t *testing.T) {
 	}
 	_ = j
 }
+
+func TestStripFences(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{in: "```json\n{\"a\": 1}\n```", want: "{\"a\": 1}"},
+		{in: "{\"a\": 1}", want: "{\"a\": 1}"},
+		{in: "```\n{\"a\": 1}\n```", want: "{\"a\": 1}"},
+		{in: "```json\n{\"a\": 1}", want: "{\"a\": 1}"},
+	}
+	for _, tt := range tests {
+		if got := stripFences(tt.in); got != tt.want {
+			t.Errorf("stripFences(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

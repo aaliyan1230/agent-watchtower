@@ -64,22 +64,21 @@ func New(model, region string, creds Credentials) *Client {
 	}
 }
 
-// ChatJSON sends a system+user pair to the model and decodes the text
-// response as JSON into out. Amazon Nova's native request shape:
-// top-level `system` array, content as text blocks, inference config
-// in its own section.
-func (c *Client) ChatJSON(ctx context.Context, system, user string, out any) error {
+// ChatText sends a system+user pair to the model and returns its text
+// response. Amazon Nova's native request shape: top-level `system`
+// array, content as text blocks, inference config in its own section.
+func (c *Client) ChatText(ctx context.Context, system, user string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"system":          []map[string]any{{"text": system}},
 		"messages":        []map[string]any{{"role": "user", "content": []map[string]any{{"text": user}}}},
 		"inferenceConfig": map[string]any{"max_new_tokens": 2048, "temperature": 0},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	raw, err := c.invoke(ctx, body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var decoded struct {
 		Output struct {
@@ -91,24 +90,26 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string, out any) err
 		} `json:"output"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return fmt.Errorf("bedrock: decode response: %w", err)
+		return "", fmt.Errorf("bedrock: decode response: %w", err)
 	}
 	text := ""
 	for _, block := range decoded.Output.Message.Content {
 		text += block.Text
 	}
 	if text == "" {
-		return fmt.Errorf("bedrock: empty response from %s", c.model)
+		return "", fmt.Errorf("bedrock: empty response from %s", c.model)
 	}
-	if err := json.Unmarshal([]byte(text), out); err != nil {
-		return fmt.Errorf("bedrock: model returned invalid JSON: %w", err)
-	}
-	return nil
+	return text, nil
 }
 
 func (c *Client) invoke(ctx context.Context, body []byte) ([]byte, error) {
 	host := strings.TrimPrefix(c.baseURL, "https://")
-	path := "/model/" + url.PathEscape(c.model) + "/invoke"
+	// AWS canonicalizes the received path by re-encoding it, so the
+	// signed canonical URI percent-encodes the model id (":" -> %3A)
+	// while the wire path keeps the literal colon. Go's EscapedPath
+	// would re-encode the colon too, so Opaque carries the raw path.
+	rawPath := "/model/" + c.model + "/invoke"
+	canonicalURI := "/model/" + url.QueryEscape(c.model) + "/invoke"
 	amzDate := time.Now().UTC().Format("20060102T150405Z")
 	dateStamp := amzDate[:8]
 
@@ -128,7 +129,7 @@ func (c *Client) invoke(ctx context.Context, body []byte) ([]byte, error) {
 		canonicalHeaders += k + ":" + strings.TrimSpace(headers[k]) + "\n"
 	}
 	canonicalRequest := strings.Join([]string{
-		http.MethodPost, path, "", canonicalHeaders, strings.Join(signedHeaders, ";"), payloadHash,
+		http.MethodPost, canonicalURI, "", canonicalHeaders, strings.Join(signedHeaders, ";"), payloadHash,
 	}, "\n")
 
 	scope := dateStamp + "/" + c.region + "/bedrock/aws4_request"
@@ -147,10 +148,14 @@ func (c *Client) invoke(ctx context.Context, body []byte) ([]byte, error) {
 		c.creds.AccessKey, scope, strings.Join(signedHeaders, ";"), signature,
 	)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
+	// Build from the base URL (host intact), then set Opaque so
+	// RequestURI sends the raw path verbatim, bypassing EscapedPath's
+	// re-encoding of the colon.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
+	req.URL.Opaque = rawPath
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

@@ -41,10 +41,11 @@ func New(model, apiKey, baseURL string) *Client {
 	}
 }
 
-// ChatJSON completes a system+user pair and decodes the model's JSON
-// response into out. The model is asked for JSON output explicitly;
-// out must be a pointer.
-func (c *Client) ChatJSON(ctx context.Context, system, user string, out any) error {
+// ChatText completes a system+user pair and returns the model's text
+// response. The model is asked for JSON output explicitly; parsing
+// the text as JSON is the caller's job (judge), so fence-wrapping and
+// parsing quirks live in one place.
+func (c *Client) ChatText(ctx context.Context, system, user string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"model": c.model,
 		"messages": []Message{
@@ -55,26 +56,26 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string, out any) err
 		"temperature":     0,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("llm: %s: %s", resp.Status, truncate(string(raw), 300))
+		return "", fmt.Errorf("llm: %s: %s", resp.Status, truncate(string(raw), 300))
 	}
 	var decoded struct {
 		Choices []struct {
@@ -84,15 +85,12 @@ func (c *Client) ChatJSON(ctx context.Context, system, user string, out any) err
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return fmt.Errorf("llm: decode response: %w", err)
+		return "", fmt.Errorf("llm: decode response: %w", err)
 	}
 	if len(decoded.Choices) == 0 {
-		return fmt.Errorf("llm: no choices in response")
+		return "", fmt.Errorf("llm: no choices in response")
 	}
-	if err := json.Unmarshal([]byte(decoded.Choices[0].Message.Content), out); err != nil {
-		return fmt.Errorf("llm: model returned invalid JSON: %w", err)
-	}
-	return nil
+	return decoded.Choices[0].Message.Content, nil
 }
 
 func truncate(s string, n int) string {
