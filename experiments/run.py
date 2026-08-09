@@ -113,6 +113,7 @@ class CellResult:
     trace_id: str = ""
     protocol: str = ""  # report protocolVersion, for artifact freezing
     judge_usage: dict = field(default_factory=dict)  # measured judge tokens
+    judge_model: str = ""  # judging model, for cost attribution on clean runs
 
 
 def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]:
@@ -151,6 +152,7 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
         trace_id=result.trace_id,
         protocol=report.get("protocolVersion", ""),
         judge_usage=report.get("judgeUsage", {}),
+        judge_model=report.get("judgeModel", ""),
         **base,
     )
 
@@ -210,8 +212,8 @@ def main() -> None:
     env: dict[str, str] | None = None
     if args.live:
         env = {"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY") or ""}
-        if args.judge == "bedrock":
-            env = aws_env()
+        if args.judge in ("bedrock", "kimi"):
+            env = aws_env()  # both ride the Bedrock transport
     proc = spawn_server(ENDPOINT, ADDR, config, env)
     try:
         results: list[CellResult] = []

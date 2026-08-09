@@ -182,7 +182,7 @@ def judge_cost_summary(results: Sequence[Mapping]) -> dict:
         usage = r.get("judge_usage") or {}
         if not usage:
             continue
-        model = next((f.get("source", "") for f in r.get("findings", []) if f.get("verifier") == "judge"), "unknown")
+        model = next((f.get("source", "") for f in r.get("findings", []) if f.get("verifier") == "judge"), r.get("judge_model", "")) or "unknown"
         used.setdefault(model, []).append((usage.get("inputTokens", 0), usage.get("outputTokens", 0)))
     out: dict[str, dict] = {}
     for model, samples in used.items():
@@ -242,8 +242,9 @@ def judge_agreement_matrix(named: Sequence[tuple[str, Sequence[Mapping]]]) -> tu
     common = set(key(r) for r in cells[0])
     for c in cells[1:]:
         common &= {key(r) for r in c}
+    order = sorted(common, key=lambda t: (t[0] is not None, t[0] or "", t[1], t[2], t[3]))
     flags = {
-        name: [any(f["verifier"] == "judge" for f in next(r for r in c if key(r) == k)["findings"]) for k in sorted(common)]
+        name: [any(f["verifier"] == "judge" for f in next(r for r in c if key(r) == k)["findings"]) for k in order]
         for name, c in zip(names, cells)
     }
     consensus = judge_consensus([flags[n] for n in names])
@@ -392,7 +393,10 @@ def main() -> None:
         print("integrity:", verify_integrity(artifact))
     print(render_table(a))
     if args.compare:
-        named = [("artifact0", a)] + [(f"artifact{i}", load_results(p)["cells"]) for i, p in enumerate(args.compare, start=1)]
+        named = [(artifact.get("judgeBackend", "primary"), a)]
+        for path in args.compare:
+            other = load_results(path)
+            named.append((other.get("judgeBackend", path), other["cells"]))
         matrix, n = judge_agreement_matrix(named)
         print()
         print(render_agreement(matrix, n))

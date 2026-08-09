@@ -55,6 +55,9 @@ func newServeMux(cfg verify.Config, store *report.Store) http.Handler {
 		if cfg.Judge != nil {
 			in, out := cfg.Judge.Usage()
 			r.SetJudgeUsage(in, out)
+			if m, ok := cfg.Judge.(interface{ Model() string }); ok {
+				r.JudgeModel = m.Model()
+			}
 		}
 		store.Put(r.TraceID, r)
 		log.Printf("trace %s: %s (%d findings)", r.TraceID, r.Verdict, len(r.Findings))

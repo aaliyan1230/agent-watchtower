@@ -49,6 +49,7 @@ type Report struct {
 	RootSpanID      string            `json:"rootSpanId"`
 	Verdict         Verdict           `json:"verdict"`
 	Judged          bool              `json:"judged"`
+	JudgeModel      string            `json:"judgeModel,omitempty"`
 	JudgeUsage      JudgeUsage        `json:"judgeUsage,omitempty"`
 	Findings        []verify.Finding  `json:"findings,omitempty"`
 	Verifiers       []VerifierSummary `json:"verifiers"`

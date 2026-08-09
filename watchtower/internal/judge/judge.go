@@ -46,6 +46,10 @@ func NewBedrock(model, region string, creds bedrock.Credentials) *LLM {
 
 func (j *LLM) Name() string { return "judge" }
 
+// Model identifies the judging model for cost attribution on runs the
+// judge found nothing to flag (no finding carries a source then).
+func (j *LLM) Model() string { return j.model }
+
 // Usage reports the token usage of the most recent Run, read from the
 // transport's own usage accounting.
 func (j *LLM) Usage() (int64, int64) { return j.lastIn, j.lastOut }
