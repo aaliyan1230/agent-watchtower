@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from opentelemetry import context, trace
-from opentelemetry.trace import get_current_span
+from opentelemetry.trace import Status, StatusCode, get_current_span
 
 from . import semconv
 from .providers import Provider, ProviderResponse, tool_schema
@@ -137,9 +137,15 @@ class Worker:
                 semconv.GEN_AI_REQUEST_MODEL: getattr(self._provider, "model", "unknown"),
                 semconv.WATCHTOWER_CONTRACT: self.contract or "",
             },
-        ):
-            resp = self._provider.chat(messages, tools=tool_schemas, contract=self.contract)
-            span = get_current_span()
+        ) as span:
+            try:
+                resp = self._provider.chat(messages, tools=tool_schemas, contract=self.contract)
+            except Exception as exc:
+                # Provider failures are evidence, not crashes: mark the
+                # span errored (the status verifier catches it) and let
+                # the loop terminate with a visible answer.
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                return ProviderResponse(content=f"(provider error: {exc})")
             span.set_attribute(semconv.GEN_AI_INPUT_TOKENS, str(resp.input_tokens))
             span.set_attribute(semconv.GEN_AI_OUTPUT_TOKENS, str(resp.output_tokens))
             span.set_attribute(semconv.GEN_AI_RESPONSE_MODEL, resp.model)
