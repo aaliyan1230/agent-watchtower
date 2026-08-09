@@ -49,15 +49,15 @@ type Step struct {
 // Budget summarizes resource consumption for the budget verifier and
 // the paper's overhead numbers.
 type Budget struct {
-	SpanCount     int
-	LLMCallCount  int
-	ToolCallCount int
-	InputTokens   int64
-	OutputTokens  int64
-	TotalTokens   int64
-	StartTime     time.Time
-	EndTime       time.Time
-	DurationMs    int64
+	SpanCount     int       `json:"spanCount"`
+	LLMCallCount  int       `json:"llmCallCount"`
+	ToolCallCount int       `json:"toolCallCount"`
+	InputTokens   int64     `json:"inputTokens"`
+	OutputTokens  int64     `json:"outputTokens"`
+	TotalTokens   int64     `json:"totalTokens"`
+	StartTime     time.Time `json:"startTime"`
+	EndTime       time.Time `json:"endTime"`
+	DurationMs    int64     `json:"durationMs"`
 }
 
 // Run is the reconstructed agent run: one trace, ordered steps, budget.

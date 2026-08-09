@@ -95,9 +95,14 @@ class Worker:
             for step in range(1, self.max_steps + 1):
                 resp = self._turn(messages, tool_schemas, step)
                 if resp.tool_calls:
+                    # The assistant turn must precede its tool results
+                    # in history (Gemini's compat endpoint requires the
+                    # model's own message, thought_signature included).
+                    if resp.assistant_message:
+                        messages.append(resp.assistant_message)
                     for tc in resp.tool_calls:
                         ok, result = self._exec_tool(tc, step)
-                        messages.append({"role": "tool", "content": result})
+                        messages.append({"role": "tool", "content": result, "tool_call_id": tc.get("id", "")})
                         if monitor:
                             action = monitor(StepInfo(
                                 worker=self.name, step=step, kind="tool",

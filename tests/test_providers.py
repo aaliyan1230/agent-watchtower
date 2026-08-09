@@ -14,7 +14,7 @@ def make_provider(handler) -> GeminiProvider:
 
 def test_missing_key_raises():
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        GeminiProvider(api_key=None, base_url="http://mock")
+        GeminiProvider(api_key="", base_url="http://mock")
 
 
 def test_request_shape_and_response_parsing():
@@ -31,7 +31,7 @@ def test_request_shape_and_response_parsing():
                 "choices": [{
                     "message": {
                         "content": "the answer is 3",
-                        "tool_calls": [{"function": {"name": "add", "arguments": '{"a": 1, "b": 2}'}}],
+                        "tool_calls": [{"id": "call_1", "function": {"name": "add", "arguments": '{"a": 1, "b": 2}'}}],
                     }
                 }],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5},
@@ -49,13 +49,13 @@ def test_request_shape_and_response_parsing():
     import json as _json
 
     body = _json.loads(captured["json"])
-    assert body["model"] == "gemini-2.5-flash"
+    assert body["model"] == "gemini-3.5-flash-lite"
     assert body["response_format"] == {"type": "json_object"}
     assert body["tools"][0]["function"]["name"] == "add"
 
     assert isinstance(resp, ProviderResponse)
     assert resp.content == "the answer is 3"
-    assert resp.tool_calls == [{"name": "add", "args": {"a": 1, "b": 2}}]
+    assert resp.tool_calls == [{"name": "add", "args": {"a": 1, "b": 2}, "id": "call_1"}]
     assert resp.input_tokens == 10 and resp.output_tokens == 5
     assert resp.system == "gemini"
 

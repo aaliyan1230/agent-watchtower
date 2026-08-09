@@ -21,7 +21,9 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 	}
 	model := cfg.JudgeCfg.Model
 	if model == "" {
-		model = "gemini-2.5-flash"
+		// Judge calls are capped per run, so the smarter tier is
+		// affordable here; workers bulk on flash-lite (see .env.example).
+		model = "gemini-3.6-flash"
 	}
 	return judge.New(model, key, cfg.JudgeCfg.BaseURL), nil
 }

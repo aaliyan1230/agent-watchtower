@@ -31,6 +31,11 @@ class ProviderResponse:
     system: str = "unknown"
     input_tokens: int = 0
     output_tokens: int = 0
+    # The assistant turn as the API returned it, verbatim. Tool-calling
+    # agents must echo it into history: Gemini's compat endpoint
+    # requires the model's own message (incl. its internal
+    # thought_signature) to precede the tool result.
+    assistant_message: dict[str, Any] | None = None
 
 
 class Provider(ABC):
@@ -65,6 +70,15 @@ class FakeProvider(Provider):
             raise RuntimeError(f"FakeProvider script exhausted after {len(self._script)} turns")
         resp = self._script[self._cursor]
         self._cursor += 1
+        if resp.tool_calls:
+            resp.assistant_message = {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": tc.get("id") or f"call-{i}", "type": "function",
+                     "function": {"name": tc["name"], "arguments": json.dumps(tc.get("args", {}))}}
+                    for i, tc in enumerate(resp.tool_calls)
+                ],
+            }
         return resp
 
 
@@ -77,13 +91,15 @@ class GeminiProvider(Provider):
 
     def __init__(
         self,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.5-flash-lite",  # best $/perf for agentic bulk; see .env.example
         api_key: str | None = None,
         base_url: str | None = None,
         client: httpx.Client | None = None,
     ):
         self.model = model
-        self._api_key = api_key or get_api_key("GEMINI_API_KEY")
+        # None means "read from env"; an explicit empty string means
+        # "there is no key" and must not fall through to the env value.
+        self._api_key = api_key if api_key is not None else get_api_key("GEMINI_API_KEY")
         if not self._api_key:
             raise ValueError("GEMINI_API_KEY is missing: add it to .env")
         self._base = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
@@ -113,7 +129,12 @@ class GeminiProvider(Provider):
             headers={"Authorization": f"Bearer {self._api_key}"},
             json=payload,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code}: {resp.text[:300]}",
+                request=resp.request,
+                response=resp,
+            )
         data = resp.json()
         msg = data["choices"][0]["message"]
         tool_calls = []
@@ -123,7 +144,7 @@ class GeminiProvider(Provider):
                 args = json.loads(raw_args)
             except json.JSONDecodeError:
                 args = {"_raw": raw_args}  # malformed args are data, not crashes
-            tool_calls.append({"name": tc["function"]["name"], "args": args})
+            tool_calls.append({"name": tc["function"]["name"], "args": args, "id": tc.get("id", "")})
         usage = data.get("usage", {})
         return ProviderResponse(
             content=msg.get("content") or "",
@@ -132,6 +153,7 @@ class GeminiProvider(Provider):
             system=self.name,
             input_tokens=usage.get("prompt_tokens", 0),
             output_tokens=usage.get("completion_tokens", 0),
+            assistant_message=msg,
         )
 
 
