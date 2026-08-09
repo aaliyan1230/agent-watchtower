@@ -65,14 +65,13 @@ func New(model, region string, creds Credentials) *Client {
 }
 
 // ChatText sends a system+user pair to the model and returns its text
-// response. Amazon Nova's native request shape: top-level `system`
-// array, content as text blocks, inference config in its own section.
+// response. Two native shapes exist: Amazon's own models (amazon.*)
+// take a top-level `system` array with text blocks and an
+// inferenceConfig; third-party models (deepseek, moonshot, qwen, ...)
+// take the OpenAI shape — system as a message role, plain string
+// content, max_tokens at top level.
 func (c *Client) ChatText(ctx context.Context, system, user string) (string, error) {
-	body, err := json.Marshal(map[string]any{
-		"system":          []map[string]any{{"text": system}},
-		"messages":        []map[string]any{{"role": "user", "content": []map[string]any{{"text": user}}}},
-		"inferenceConfig": map[string]any{"max_new_tokens": 2048, "temperature": 0},
-	})
+	body, err := json.Marshal(c.requestBody(system, user))
 	if err != nil {
 		return "", err
 	}
@@ -80,26 +79,64 @@ func (c *Client) ChatText(ctx context.Context, system, user string) (string, err
 	if err != nil {
 		return "", err
 	}
+	return c.parseResponse(raw)
+}
+
+func (c *Client) requestBody(system, user string) map[string]any {
+	if strings.HasPrefix(c.model, "amazon.") {
+		return map[string]any{
+			"system":          []map[string]any{{"text": system}},
+			"messages":        []map[string]any{{"role": "user", "content": []map[string]any{{"text": user}}}},
+			"inferenceConfig": map[string]any{"max_new_tokens": 2048, "temperature": 0},
+		}
+	}
+	return map[string]any{
+		"messages": []map[string]any{
+			{"role": "system", "content": system},
+			{"role": "user", "content": user},
+		},
+		"max_tokens":  2048,
+		"temperature": 0,
+	}
+}
+
+func (c *Client) parseResponse(raw []byte) (string, error) {
+	if strings.HasPrefix(c.model, "amazon.") {
+		var decoded struct {
+			Output struct {
+				Message struct {
+					Content []struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			} `json:"output"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return "", fmt.Errorf("bedrock: decode response: %w", err)
+		}
+		text := ""
+		for _, block := range decoded.Output.Message.Content {
+			text += block.Text
+		}
+		if text == "" {
+			return "", fmt.Errorf("bedrock: empty response from %s", c.model)
+		}
+		return text, nil
+	}
 	var decoded struct {
-		Output struct {
+		Choices []struct {
 			Message struct {
-				Content []struct {
-					Text string `json:"text"`
-				} `json:"content"`
+				Content string `json:"content"`
 			} `json:"message"`
-		} `json:"output"`
+		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return "", fmt.Errorf("bedrock: decode response: %w", err)
 	}
-	text := ""
-	for _, block := range decoded.Output.Message.Content {
-		text += block.Text
-	}
-	if text == "" {
+	if len(decoded.Choices) == 0 || decoded.Choices[0].Message.Content == "" {
 		return "", fmt.Errorf("bedrock: empty response from %s", c.model)
 	}
-	return text, nil
+	return decoded.Choices[0].Message.Content, nil
 }
 
 func (c *Client) invoke(ctx context.Context, body []byte) ([]byte, error) {

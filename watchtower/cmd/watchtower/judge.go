@@ -36,7 +36,7 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 		}
 		model := cfg.JudgeCfg.Model
 		if model == "" {
-			model = "amazon.nova-lite-v1:0"
+			model = "deepseek.v3.2"
 		}
 		region := os.Getenv("AWS_REGION")
 		if region == "" {

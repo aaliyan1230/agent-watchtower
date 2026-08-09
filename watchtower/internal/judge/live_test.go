@@ -19,7 +19,7 @@ func TestBedrockJudgeLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j := NewBedrock("amazon.nova-lite-v1:0", "us-east-1", creds)
+	j := NewBedrock("deepseek.v3.2", "us-east-1", creds)
 	run := &graph.Run{
 		TraceID: "probe",
 		Steps:   []graph.Step{{Order: 1, Kind: graph.StepLLM, Agent: "a", Model: "fake", InputTokens: 5}},
