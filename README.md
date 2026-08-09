@@ -1,17 +1,16 @@
 # Watchtower
 
 **Watchtower keeps an eye on AI agents while they work.** It watches
-what your agents actually do — every model call, every tool call —
+what your agents actually do, every model call and every tool call,
 reconstructs each "run" from that record, and tells you, with evidence,
 whether the run was healthy or broken.
 
-Think of it as a flight recorder plus an inspector for agent runs:
-agents write down everything they did, and Watchtower reads the notes,
+Think of it as a flight recorder plus an inspector for agent runs.
+Agents write down everything they did, Watchtower reads the notes,
 rebuilds the story, and hands you a verdict: **PASS**, **FLAGGED**, or
-**FAIL** — always with the receipts (which call, when, what went
-wrong).
+**FAIL**, always with the receipts (which call, when, what went wrong).
 
-It is built as a small research project: the pieces are deliberately
+It is built as a small research project. The pieces are deliberately
 simple, everything is testable offline, and every claim about what it
 catches is backed by a reproducible experiment.
 
@@ -19,29 +18,30 @@ catches is backed by a reproducible experiment.
 
 ## What this is
 
-A multi-agent system is a handful of AI agents working on a task —
-calling tools, reading results, talking to each other. They fail in
-predictable ways: they produce malformed output, call tools they
-shouldn't, get stuck repeating the same call, blow their budgets, or
-time out.
+A multi-agent system is a handful of AI agents working on a task,
+calling tools, reading results, and talking to each other. They fail
+in predictable ways: malformed output, tools they should not have
+called, the same call repeated forever, blown budgets, timeouts.
 
 Watchtower catches those failures. Three ideas make it work:
 
 1. **Agents write everything down.** The Python harness records every
-   model call and tool call as a *span* — a small timestamped receipt
+   model call and tool call as a *span*, a small timestamped receipt
    with the details (model, tokens, tool name, success, output).
 2. **A Go service reads the receipts.** It reconstructs the whole run
-   from the flat list of spans — who did what, in what order, how much
-   it cost — then runs a handful of *deterministic checks* over it.
-   No AI involved in the checking: same input, same verdict, always.
-3. **Every verdict comes with evidence.** Not "something was wrong" —
-   the exact span ids, timestamps, and offending values that triggered
-   the finding. Verdicts are reproducible from the same trace forever.
+   from the flat list of spans (who did what, in what order, how much
+   it cost) and then runs a handful of *deterministic checks* over it.
+   No AI does the checking. The same input always produces the same
+   verdict.
+3. **Every verdict comes with evidence.** You get the exact span ids,
+   timestamps, and offending values that triggered the finding, not a
+   vague "something was wrong". Verdicts are reproducible from the
+   same trace forever.
 
 An optional **LLM judge** (Gemini or DeepSeek via Bedrock) can add a
 second opinion on top. The experiments show it catches things the
-deterministic checks miss — and, just as importantly, that judges
-disagree with each other, which is why the deterministic layer is the
+deterministic checks miss, and they show judges disagree with each
+other. That disagreement is why the deterministic layer is the
 backbone.
 
 ---
@@ -53,10 +53,10 @@ backbone.
 | Piece | What it does |
 |---|---|
 | **Agent harness** (Python) | Your agents: workers with tools, a supervisor that watches them and can halt, reroute, or escalate. Every call is recorded via OpenTelemetry. |
-| **OpenTelemetry SDK** | The standard recording layer — agents emit a *span* per model call / tool call. Anything that speaks OTel can feed Watchtower, not just the bundled harness. |
+| **OpenTelemetry SDK** | The standard recording layer. Agents emit a *span* per model call and tool call. Anything that speaks OTel can feed Watchtower, not just the bundled harness. |
 | **Watchtower** (Go service) | Receives spans, rebuilds the run, checks it, writes the verdict. |
 | **LLM judge** (optional) | A second opinion from a frontier model, on a capped sample of runs. |
-| **Verdict report** | `PASS` / `FLAGGED` / `FAIL` plus the evidence bundle — and a measured token cost when the judge ran. |
+| **Verdict report** | `PASS` / `FLAGGED` / `FAIL` plus the evidence bundle and a measured token cost when the judge ran. |
 
 ### The verification pipeline
 
@@ -64,23 +64,23 @@ backbone.
 
 The checks are deliberately boring and deterministic:
 
-- **schema** — structured output honored its contract (right JSON, right types)?
-- **policy** — every tool call stayed on the allowlist?
-- **loop** — did the agent repeat the same call (same tool, same arguments) or oscillate?
-- **budget** — steps, tokens, or duration over the limit?
-- **status** — did any span end in an error (e.g. a provider timeout)?
+- **schema**: structured output honored its contract (right JSON, right types)?
+- **policy**: every tool call stayed on the allowlist?
+- **loop**: did the agent repeat the same call (same tool, same arguments) or oscillate?
+- **budget**: steps, tokens, or duration over the limit?
+- **status**: did any span end in an error (e.g. a provider timeout)?
 
-Each check emits *findings* — and a finding without evidence isn't one:
-findings carry the exact span ids, timestamps, and values. Findings map
-to a verdict: any critical finding → `FAIL`, any warning → `FLAGGED`,
-otherwise `PASS`.
+Each check emits *findings*, and a finding without evidence is not a
+finding. Findings carry the exact span ids, timestamps, and values.
+They map to a verdict. A critical finding means `FAIL`, a warning
+means `FLAGGED`, and a clean run means `PASS`.
 
 ---
 
 ## Quick start
 
-Everything below runs **offline** — no API keys, no network beyond
-localhost.
+Everything below runs **offline**, with no API keys and no network
+beyond localhost.
 
 ```sh
 # one-time setup
@@ -101,8 +101,8 @@ watchtower ingest at http://127.0.0.1:4318
 demo: OK
 ```
 
-`make test` runs the whole test suite (Go, race-detector enabled, plus
-Python tests).
+`make test` runs the whole test suite (Go with the race detector, plus
+the Python tests).
 
 ---
 
@@ -128,8 +128,8 @@ make serve        # listens on :4318
 ```
 
 Agents post their spans to `POST /v1/traces` (real OTLP/HTTP
-protobuf — any OpenTelemetry exporter can point here). The verdict for
-a trace is then available at `GET /v1/reports/{traceId}`.
+protobuf, so any OpenTelemetry exporter can point here). The verdict
+for a trace is then available at `GET /v1/reports/{traceId}`.
 
 ### Live smoke test (one real model call, needs a key)
 
@@ -138,8 +138,8 @@ cp .env.example .env   # then put GEMINI_API_KEY in it
 make live
 ```
 
-Runs one real Gemini agent through the whole pipeline — tool call,
-spans, verification, judge — and prints the verdict.
+Runs one real Gemini agent through the whole pipeline, from tool call
+to judge, and prints the verdict.
 
 ---
 
@@ -147,11 +147,11 @@ spans, verification, judge — and prints the verdict.
 
 Every claim above is measured. The experiment suite runs a matrix of
 **6 fault types × 5 seeds × 2 model variants × 3 runs**, plus clean
-control runs — 210 cells, each through the real pipeline.
+control runs, 210 cells, each through the real pipeline.
 
 ![Experiment](assets/diagrams/experiment.png)
 
-Current results (offline, fully deterministic — and confirmed live
+Current results (offline, fully deterministic, and confirmed live
 with real Gemini runs):
 
 ```
@@ -168,12 +168,12 @@ schema_violation          0%     0%      0%     100%       0%
 ```
 
 Each fault type is caught by exactly the check designed for it. The
-LLM judge adds a second opinion: on 210 live runs it agreed with the
+LLM judge adds a second opinion. On 210 live runs it agreed with the
 deterministic verdicts at κ ≈ 0.73, missed some faults (loop 50%,
-schema 90%), and cost ~$0.12 for the whole matrix (~$0.0006/run,
-measured tokens). Three different judges (Gemini, DeepSeek, Kimi)
-disagree with each other surprisingly often — which is exactly why the
-deterministic layer, not the judge, is the backbone.
+schema 90%), and cost about $0.12 for the whole matrix (~$0.0006 per
+run, measured tokens). Three different judges (Gemini, DeepSeek,
+Kimi) disagree with each other surprisingly often, which is exactly
+why the deterministic checks stay the foundation.
 
 Rerun it yourself:
 
@@ -184,10 +184,10 @@ make experiment-bedrock   # pilot with the DeepSeek judge on Bedrock
 make experiment-agreement # judge-vs-judge kappa matrix
 ```
 
-Artifacts are checksummed and versioned: every results file records
+Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over
-its cells, so numbers can be reproduced — and `make experiment`
-regenerates them from scratch.
+its cells, so numbers can be reproduced. `make experiment` regenerates
+them from scratch.
 
 ---
 
@@ -223,14 +223,3 @@ make vet         # go vet
 make diagrams    # regenerate diagram PNGs from the .excalidraw sources
 ```
 
-Conventions are short: `feat:`/`fix:`/`chore:` commits; table-driven Go
-tests; comments only where the code can't explain itself; `docs/` and
-`AGENTS.md` are never committed; API keys live in `.env` only.
-
----
-
-## Status
-
-Phases 0–2 done: real OTLP ingest, the agent harness, the deterministic
-verifiers, the LLM judge (two providers), and the full experiment
-matrix with measured numbers. Next: the paper.
