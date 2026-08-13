@@ -48,7 +48,7 @@ backbone.
 
 ## How it works
 
-![Architecture](assets/diagrams/architecture.png)
+![Architecture: harness and traces flow through Go ingest, run reconstruction, verification, and report retrieval](assets/diagrams/architecture.png)
 
 | Piece | What it does |
 |---|---|
@@ -60,7 +60,7 @@ backbone.
 
 ### The verification pipeline
 
-![Pipeline](assets/diagrams/pipeline.png)
+![Verification pipeline: deterministic checks and an optional judge produce evidence-backed PASS, FLAGGED, or FAIL reports](assets/diagrams/pipeline.png)
 
 The checks are deliberately boring and deterministic:
 
@@ -149,7 +149,7 @@ Every claim above is measured. The experiment suite runs a matrix of
 **6 fault types × 5 seeds × 2 model variants × 3 runs**, plus clean
 control runs, 210 cells, each through the real pipeline.
 
-![Experiment](assets/diagrams/experiment.png)
+![Experiment flow: seeded fault matrix through the real telemetry pipeline into reproducible analysis artifacts](assets/diagrams/experiment.png)
 
 Current results (offline, fully deterministic, and confirmed live
 with real Gemini runs):
@@ -222,4 +222,3 @@ make test        # go test -race + pytest
 make vet         # go vet
 make diagrams    # regenerate diagram PNGs from the .excalidraw sources
 ```
-
