@@ -157,6 +157,35 @@ func TestReconstructOrphanBecomesRoot(t *testing.T) {
 	}
 }
 
+func TestReconstructTracksEvidenceGaps(t *testing.T) {
+	spans := syntheticTrace()
+	spans[2].ParentID = "missing-parent"
+	duplicate := spans[1]
+	duplicate.StartTime = duplicate.StartTime.Add(20 * time.Second)
+	duplicate.EndTime = duplicate.EndTime.Add(20 * time.Second)
+	spans = append(spans, duplicate)
+
+	run, err := Reconstruct(spans)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if run.Evidence.Complete() {
+		t.Fatalf("evidence = %+v, want incomplete", run.Evidence)
+	}
+	if len(run.Evidence.DuplicateSpanIDs) != 1 || run.Evidence.DuplicateSpanIDs[0] != "s1" {
+		t.Fatalf("duplicate span ids = %+v, want [s1]", run.Evidence.DuplicateSpanIDs)
+	}
+	if len(run.Evidence.MissingParents) != 1 {
+		t.Fatalf("missing parents = %+v, want one gap", run.Evidence.MissingParents)
+	}
+	if got := run.Evidence.MissingParents[0]; got.SpanID != "s2" || got.ParentID != "missing-parent" {
+		t.Fatalf("missing parent = %+v", got)
+	}
+	if len(run.Steps) != len(syntheticTrace()) {
+		t.Fatalf("steps = %d, want duplicate span ignored during reconstruction", len(run.Steps))
+	}
+}
+
 func TestReconstructSiblingOrderByTime(t *testing.T) {
 	spans := syntheticTrace()
 	// Swap the start times of s3 and s5 so the input order no longer

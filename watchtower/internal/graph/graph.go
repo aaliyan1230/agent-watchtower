@@ -62,12 +62,35 @@ type Budget struct {
 	DurationMs    int64     `json:"durationMs"`
 }
 
+// MissingParent records a span whose parent reference was not present in
+// the received trace. The span can still be inspected, but its position
+// in the run is not fully trustworthy.
+type MissingParent struct {
+	SpanID   string `json:"spanId"`
+	ParentID string `json:"parentSpanId"`
+}
+
+// Evidence summarizes telemetry integrity findings discovered while
+// reconstructing the run. A non-empty field means the trace is usable
+// for inspection but not sufficient for a confident PASS.
+type Evidence struct {
+	DuplicateSpanIDs []string        `json:"duplicateSpanIds,omitempty"`
+	MissingParents   []MissingParent `json:"missingParents,omitempty"`
+}
+
+// Complete reports whether reconstruction found any structural evidence
+// gaps. It does not claim that the agent behaved correctly.
+func (e Evidence) Complete() bool {
+	return len(e.DuplicateSpanIDs) == 0 && len(e.MissingParents) == 0
+}
+
 // Run is the reconstructed agent run: one trace, ordered steps, budget.
 type Run struct {
 	TraceID    string
 	RootSpanID string
 	Steps      []Step
 	Budget     Budget
+	Evidence   Evidence
 }
 
 // ToolCalls returns just the tool steps, in run order — the loop
@@ -101,14 +124,40 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 	}
 
 	byID := make(map[string]*model.Span, len(spans))
-	children := make(map[string][]*model.Span)
+	unique := make([]*model.Span, 0, len(spans))
+	evidence := Evidence{}
+	duplicateSet := make(map[string]struct{})
 	for i := range spans {
 		s := &spans[i]
+		if _, exists := byID[s.SpanID]; exists {
+			if _, recorded := duplicateSet[s.SpanID]; !recorded {
+				evidence.DuplicateSpanIDs = append(evidence.DuplicateSpanIDs, s.SpanID)
+				duplicateSet[s.SpanID] = struct{}{}
+			}
+			continue
+		}
 		byID[s.SpanID] = s
+		unique = append(unique, s)
+	}
+
+	children := make(map[string][]*model.Span)
+	for _, s := range unique {
 		if s.ParentID != "" {
 			children[s.ParentID] = append(children[s.ParentID], s)
+			if byID[s.ParentID] == nil {
+				evidence.MissingParents = append(evidence.MissingParents, MissingParent{
+					SpanID: s.SpanID, ParentID: s.ParentID,
+				})
+			}
 		}
 	}
+	sort.Strings(evidence.DuplicateSpanIDs)
+	sort.Slice(evidence.MissingParents, func(i, j int) bool {
+		if evidence.MissingParents[i].SpanID == evidence.MissingParents[j].SpanID {
+			return evidence.MissingParents[i].ParentID < evidence.MissingParents[j].ParentID
+		}
+		return evidence.MissingParents[i].SpanID < evidence.MissingParents[j].SpanID
+	})
 
 	// Sibling ordering is by start time; a stable sort keeps ties in
 	// input order, which preserves ingestion order for same-timestamp
@@ -120,8 +169,7 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 	}
 
 	var roots []*model.Span
-	for i := range spans {
-		s := &spans[i]
+	for _, s := range unique {
 		if s.ParentID == "" || byID[s.ParentID] == nil {
 			roots = append(roots, s)
 		}
@@ -130,7 +178,7 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 		return roots[i].StartTime.Before(roots[j].StartTime)
 	})
 
-	run := &Run{TraceID: traceID, RootSpanID: roots[0].SpanID}
+	run := &Run{TraceID: traceID, RootSpanID: roots[0].SpanID, Evidence: evidence}
 	var order int
 	var walk func(*model.Span)
 	walk = func(s *model.Span) {

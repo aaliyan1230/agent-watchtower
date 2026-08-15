@@ -16,7 +16,12 @@ func TestVerdictFor(t *testing.T) {
 	}{
 		{name: "clean", want: VerdictPass},
 		{name: "warning flags", findings: []verify.Finding{{Verifier: "loop", Severity: verify.SeverityWarning}}, want: VerdictFlagged},
+		{name: "evidence gap is inconclusive", findings: []verify.Finding{{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning}}, want: VerdictInconclusive},
 		{name: "critical fails", findings: []verify.Finding{{Verifier: "schema", Severity: verify.SeverityCritical}}, want: VerdictFail},
+		{name: "critical violation beats evidence gap", findings: []verify.Finding{
+			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning},
+			{Verifier: "policy", Severity: verify.SeverityCritical},
+		}, want: VerdictFail},
 		{name: "warning then critical fails", findings: []verify.Finding{
 			{Verifier: "loop", Severity: verify.SeverityWarning},
 			{Verifier: "policy", Severity: verify.SeverityCritical},
@@ -45,8 +50,8 @@ func TestBuildSummarizesVerifiers(t *testing.T) {
 	if r.Verdict != VerdictFail {
 		t.Fatalf("verdict = %s, want FAIL", r.Verdict)
 	}
-	if len(r.Verifiers) != 5 {
-		t.Fatalf("verifiers = %d, want 5 (schema, policy, loop, budget, status)", len(r.Verifiers))
+	if len(r.Verifiers) != 6 {
+		t.Fatalf("verifiers = %d, want 6 (schema, policy, loop, budget, status, evidence)", len(r.Verifiers))
 	}
 	if r.Verifiers[0].Name != "schema" || r.Verifiers[0].Findings != 2 || r.Verifiers[0].MaxSeverity != verify.SeverityCritical {
 		t.Errorf("schema summary = %+v", r.Verifiers[0])
@@ -56,6 +61,9 @@ func TestBuildSummarizesVerifiers(t *testing.T) {
 	}
 	if r.Verifiers[3].Findings != 0 {
 		t.Errorf("budget summary = %+v, want zero findings reported", r.Verifiers[3])
+	}
+	if r.Verifiers[5].Name != "evidence" || r.Verifiers[5].Findings != 0 {
+		t.Errorf("evidence summary = %+v, want zero findings reported", r.Verifiers[5])
 	}
 }
 
@@ -73,7 +81,7 @@ func TestReportJSONHasEvidence(t *testing.T) {
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"traceId", "rootSpanId", "verdict", "verifiers", "budget"} {
+	for _, key := range []string{"traceId", "rootSpanId", "verdict", "verifiers", "budget", "evidence"} {
 		if _, ok := back[key]; !ok {
 			t.Errorf("report JSON missing %q", key)
 		}

@@ -30,7 +30,7 @@ from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
-from .suite import PROTOCOL_VERSION, ExperimentCell
+from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, checksum
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
@@ -106,6 +106,7 @@ class CellResult:
     model: str
     run: int
     verdict: str
+    evidence_fault: str | None = None
     judged: bool = False
     findings: list[dict] = field(default_factory=list)
     budget: dict = field(default_factory=dict)
@@ -140,7 +141,13 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
     result = supervisor.run("Triage ticket #42: users cannot log in", build_workers(telemetry, cell, live))
     telemetry.flush()
     report = telemetry.fetch_report(result.trace_id)
-    base = dict(fault=cell.fault, seed=cell.seed, model=cell.model, run=cell.run)
+    base = dict(
+        fault=cell.fault,
+        seed=cell.seed,
+        model=cell.model,
+        run=cell.run,
+        evidence_fault=getattr(cell, "evidence_fault", None),
+    )
     if report is None:
         return CellResult(verdict="NO_REPORT", **base)
     return CellResult(
@@ -171,7 +178,16 @@ def cells_signature(cells: list[ExperimentCell]) -> str:
     import hashlib
     import json as _json
 
-    identity = [{"fault": c.fault, "seed": c.seed, "model": c.model, "run": c.run} for c in cells]
+    identity = [
+        {
+            "fault": c.fault,
+            "evidenceFault": getattr(c, "evidence_fault", None),
+            "seed": c.seed,
+            "model": c.model,
+            "run": c.run,
+        }
+        for c in cells
+    ]
     return hashlib.sha256(_json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
@@ -182,13 +198,17 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="real Gemini + LLM judge (needs GEMINI_API_KEY)")
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
     parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
+    parser.add_argument("--evidence", action="store_true", help="run the clean-behavior telemetry-fault grid")
     parser.add_argument("--judge", choices=["gemini", "bedrock", "kimi"], default="gemini", help="judge backend for live mode")
     args = parser.parse_args()
 
     if args.live and args.judge == "gemini" and not get_api_key("GEMINI_API_KEY"):
         raise SystemExit("--live --judge gemini needs GEMINI_API_KEY in .env")
 
-    if args.pilot:
+    if args.evidence:
+        cells = build_evidence_grid()
+        grid_checksum = checksum(cells)
+    elif args.pilot:
         cells = [
             ExperimentCell(fault=fault, seed=seed, model="flash", run=1)
             for fault in [None, *(f.value for f in FaultKind)]
@@ -218,7 +238,11 @@ def main() -> None:
     try:
         results: list[CellResult] = []
         for i, cell in enumerate(cells, 1):
-            telemetry = HarnessTelemetry(ENDPOINT, service_name="experiment")
+            telemetry = HarnessTelemetry(
+                ENDPOINT,
+                service_name="experiment",
+                evidence_fault=getattr(cell, "evidence_fault", None),
+            )
             res = run_cell(telemetry, cell, args.live)
             telemetry.shutdown()
             results.append(res)
@@ -230,6 +254,7 @@ def main() -> None:
             "cellsSignature": cells_signature(cells),
             "reportProtocolVersion": results[0].protocol,
             "mode": "live" if args.live else "offline",
+            "gridKind": "evidence" if args.evidence else "behavior",
             "judgeBackend": args.judge,
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cells": [asdict(r) for r in results],

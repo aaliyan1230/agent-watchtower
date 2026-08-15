@@ -116,14 +116,56 @@ def load_results(path: str) -> dict:
         return json.load(fh)
 
 
+def _fault_label(result: Mapping) -> str | None:
+    """Return the behavior or telemetry fault label for one cell."""
+    return result.get("fault") or result.get("evidence_fault") or result.get("evidenceFault")
+
+
+EVIDENCE_CONTROLS = {"reorder_spans"}
+
+
+def _positive_label(result: Mapping) -> str | None:
+    """Return a fault label, excluding telemetry perturbation controls."""
+    label = _fault_label(result)
+    if label in EVIDENCE_CONTROLS:
+        return None
+    return label
+
+
+def false_assurance_rate(results: Sequence[Mapping]) -> float:
+    """Fraction of evidence-faulted runs that still returned PASS."""
+    runs = [
+        r
+        for r in results
+        if (r.get("evidence_fault") or r.get("evidenceFault"))
+        and _fault_label(r) not in EVIDENCE_CONTROLS
+    ]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") == "PASS" for r in runs) / len(runs)
+
+
+def inconclusive_rate(results: Sequence[Mapping]) -> float:
+    """Fraction of evidence-faulted runs that returned INCONCLUSIVE."""
+    runs = [
+        r
+        for r in results
+        if (r.get("evidence_fault") or r.get("evidenceFault"))
+        and _fault_label(r) not in EVIDENCE_CONTROLS
+    ]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") == "INCONCLUSIVE" for r in runs) / len(runs)
+
+
 def fault_coverage(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
     """For each fault type, the fraction of its runs each verifier
     caught — the "where deterministic catches what" matrix."""
-    faults = sorted({r["fault"] for r in results if r["fault"]})
-    verifiers = sorted({f["verifier"] for r in results if r["fault"] for f in r["findings"]})
+    faults = sorted({_positive_label(r) for r in results if _positive_label(r)})
+    verifiers = sorted({f["verifier"] for r in results if _positive_label(r) for f in r["findings"]})
     out: dict[str, dict[str, float]] = {}
     for fault in faults:
-        runs = [r for r in results if r["fault"] == fault]
+        runs = [r for r in results if _positive_label(r) == fault]
         out[fault] = {
             v: sum(any(f["verifier"] == v for f in r["findings"]) for r in runs) / len(runs)
             for v in verifiers
@@ -146,10 +188,10 @@ def overhead_summary(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
     """Tokens and wall-clock duration per fault group: mean plus p50/p99
     — the overhead the paper reports (cost is per-token, so tokens are
     the honest proxy without live pricing)."""
-    groups = sorted({r["fault"] or "clean" for r in results})
+    groups = sorted({_fault_label(r) or "clean" for r in results})
     out: dict[str, dict[str, float]] = {}
     for group in groups:
-        runs = [r for r in results if (r["fault"] or "clean") == group]
+        runs = [r for r in results if (_fault_label(r) or "clean") == group]
         tokens = [float(r["budget"].get("totalTokens", 0)) for r in runs]
         duration = [float(r["budget"].get("durationMs", 0)) for r in runs]
         out[group] = {
@@ -217,7 +259,7 @@ def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float |
     """Kappa between two judges' opinions on the same runs, matched by
     (fault, seed, run) — the inter-provider agreement metric (e.g.
     Gemini judge vs Bedrock judge)."""
-    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    key = lambda r: (_fault_label(r), r["seed"], r["model"], r["run"])
     bmap = {key(r): r for r in b}
     a_flags: list[bool] = []
     b_flags: list[bool] = []
@@ -238,7 +280,7 @@ def judge_agreement_matrix(named: Sequence[tuple[str, Sequence[Mapping]]]) -> tu
     The 3-way inter-judge consistency table for the paper."""
     names = [n for n, _ in named]
     cells = [cells for _, cells in named]
-    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    key = lambda r: (_fault_label(r), r["seed"], r["model"], r["run"])
     common = set(key(r) for r in cells[0])
     for c in cells[1:]:
         common &= {key(r) for r in c}
@@ -282,7 +324,16 @@ def cells_signature(cells: Sequence[Mapping]) -> str:
     self-integrity check: any truncation or tampering changes it."""
     import hashlib
 
-    identity = [{"fault": r["fault"], "seed": r["seed"], "model": r["model"], "run": r["run"]} for r in cells]
+    identity = [
+        {
+            "fault": r.get("fault"),
+            "evidenceFault": r.get("evidence_fault") or r.get("evidenceFault"),
+            "seed": r["seed"],
+            "model": r["model"],
+            "run": r["run"],
+        }
+        for r in cells
+    ]
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
@@ -292,7 +343,7 @@ def verify_integrity(artifact: Mapping) -> str:
     problems = []
     if cells_signature(artifact.get("cells", [])) != artifact.get("cellsSignature"):
         problems.append("cellsSignature mismatch (artifact tampered or truncated)")
-    if artifact.get("protocolVersion") != "1":
+    if artifact.get("protocolVersion") != "2":
         problems.append(f"unknown suite protocol {artifact.get('protocolVersion')!r}")
     return "; ".join(problems) or "ok"
 
@@ -301,17 +352,17 @@ def delta(a: Sequence[Mapping], b: Sequence[Mapping]) -> dict:
     """Compares two artifacts per fault: detection and false-positive
     deltas plus judge-vs-deterministic kappa on each. Keys on the
     (fault, seed, run) identity so only paired runs are compared."""
-    key = lambda r: (r["fault"], r["seed"], r["model"], r["run"])
+    key = lambda r: (_fault_label(r), r["seed"], r["model"], r["run"])
     bmap = {key(r): r for r in b}
     paired = [(ra, bmap[key(ra)]) for ra in a if key(ra) in bmap]
-    faults = sorted({ra["fault"] for ra, _ in paired if ra["fault"]})
+    faults = sorted({_fault_label(ra) for ra, _ in paired if _fault_label(ra)})
     out: dict = {"pairedRuns": len(paired)}
     for fault in faults:
-        runs = [(ra, rb) for ra, rb in paired if ra["fault"] == fault]
+        runs = [(ra, rb) for ra, rb in paired if _fault_label(ra) == fault]
         det_a = sum(ra["verdict"] != "PASS" for ra, _ in runs) / len(runs)
         det_b = sum(rb["verdict"] != "PASS" for _, rb in runs) / len(runs)
         out[fault] = {"detA": det_a, "detB": det_b, "delta": det_b - det_a}
-    clean = [(ra, rb) for ra, rb in paired if ra["fault"] is None]
+    clean = [(ra, rb) for ra, rb in paired if _fault_label(ra) is None]
     if clean:
         fpr_a = sum(ra["verdict"] != "PASS" for ra, _ in clean) / len(clean)
         fpr_b = sum(rb["verdict"] != "PASS" for _, rb in clean) / len(clean)
@@ -336,13 +387,22 @@ def render_table(results: Sequence[Mapping]) -> str:
     coverage, false positives, overhead, judge agreement."""
     cells = list(results)
     verdicts = [r["verdict"] for r in cells]
-    truth = [r["fault"] is not None for r in cells]
+    truth = [_positive_label(r) is not None for r in cells]
     det = detection_rate(verdicts, truth)
     fpr = false_positive_rate(verdicts, truth)
 
     lines = ["watchtower experiment results"]
     lines.append(f"runs={len(cells)}")
     lines.append(f"overall detection: {_pct(det)}   false positives (clean runs): {_pct(fpr)}")
+    if any(
+        (r.get("evidence_fault") or r.get("evidenceFault"))
+        and _fault_label(r) not in EVIDENCE_CONTROLS
+        for r in cells
+    ):
+        lines.append(
+            f"evidence false assurance: {_pct(false_assurance_rate(cells))}   "
+            f"inconclusive: {_pct(inconclusive_rate(cells))}"
+        )
     lines.append("")
     lines.append("coverage: fault x verifier (fraction of faulted runs caught)")
     coverage = fault_coverage(cells)
@@ -350,7 +410,7 @@ def render_table(results: Sequence[Mapping]) -> str:
     header = f"{'fault':<18}" + "".join(f"{v:>10}" for v in verifiers) + f"{'detected':>10}"
     lines.append(header)
     for fault, row in sorted(coverage.items()):
-        fault_runs = [r for r in cells if r["fault"] == fault]
+        fault_runs = [r for r in cells if _positive_label(r) == fault]
         detected = sum(r["verdict"] != "PASS" for r in fault_runs) / len(fault_runs)
         line = f"{fault:<18}" + "".join(f"{_pct(row.get(v, 0.0)):>10}" for v in verifiers) + f"{_pct(detected):>10}"
         lines.append(line)

@@ -1,4 +1,4 @@
-.PHONY: test vet serve demo live venv experiment experiment-live experiment-bedrock experiment-agreement diagrams
+.PHONY: test vet serve demo live venv experiment experiment-evidence experiment-live experiment-bedrock experiment-agreement diagrams
 
 test: ## go test -race + pytest
 	cd watchtower && go test ./... -race
@@ -27,6 +27,11 @@ experiment: ## offline matrix run + analysis (deterministic, free)
 	.venv/bin/python -m experiments.suite --out artifacts
 	.venv/bin/python -m experiments.run --grid artifacts/grid.json --out artifacts/results.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results.json
+
+experiment-evidence: ## clean-behavior telemetry-fault grid (deterministic, free)
+	.venv/bin/python -m experiments.suite --evidence --out artifacts
+	.venv/bin/python -m experiments.run --evidence --out artifacts/results-evidence.json
+	.venv/bin/python -m experiments.analyze --results artifacts/results-evidence.json
 
 experiment-live: ## small live stratified sample (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --out artifacts/results-live.json

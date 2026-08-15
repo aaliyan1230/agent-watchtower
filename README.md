@@ -3,12 +3,13 @@
 **Watchtower keeps an eye on AI agents while they work.** It watches
 what your agents actually do, every model call and every tool call,
 reconstructs each "run" from that record, and tells you, with evidence,
-whether the run was healthy or broken.
+whether the run was healthy, broken, or not sufficiently observed.
 
 Think of it as a flight recorder plus an inspector for agent runs.
 Agents write down everything they did, Watchtower reads the notes,
-rebuilds the story, and hands you a verdict: **PASS**, **FLAGGED**, or
-**FAIL**, always with the receipts (which call, when, what went wrong).
+rebuilds the story, and hands you a verdict: **PASS**, **INCONCLUSIVE**,
+**FLAGGED**, or **FAIL**, always with the receipts (which call, when,
+what went wrong).
 
 It is built as a small research project. The pieces are deliberately
 simple, everything is testable offline, and every claim about what it
@@ -50,17 +51,24 @@ backbone.
 
 ![Architecture: harness and traces flow through Go ingest, run reconstruction, verification, and report retrieval](assets/diagrams/architecture.png)
 
+The research flow adds an explicit evidence-quality gate around a
+supervisor meta-agent. Behavior faults and telemetry faults are varied
+separately, so a missing or duplicated span cannot silently become proof
+that a worker succeeded.
+
+![Evidence-aware supervision flow: behavior and telemetry faults pass through reconstruction, evidence obligations, and verdict mapping](assets/diagrams/evidence_flow.png)
+
 | Piece | What it does |
 |---|---|
 | **Agent harness** (Python) | Your agents: workers with tools, a supervisor that watches them and can halt, reroute, or escalate. Every call is recorded via OpenTelemetry. |
 | **OpenTelemetry SDK** | The standard recording layer. Agents emit a *span* per model call and tool call. Anything that speaks OTel can feed Watchtower, not just the bundled harness. |
 | **Watchtower** (Go service) | Receives spans, rebuilds the run, checks it, writes the verdict. |
 | **LLM judge** (optional) | A second opinion from a frontier model, on a capped sample of runs. |
-| **Verdict report** | `PASS` / `FLAGGED` / `FAIL` plus the evidence bundle and a measured token cost when the judge ran. |
+| **Verdict report** | `PASS` / `INCONCLUSIVE` / `FLAGGED` / `FAIL` plus the evidence bundle and a measured token cost when the judge ran. |
 
 ### The verification pipeline
 
-![Verification pipeline: deterministic checks and an optional judge produce evidence-backed PASS, FLAGGED, or FAIL reports](assets/diagrams/pipeline.png)
+![Verification pipeline: deterministic checks and an optional judge produce evidence-backed PASS, INCONCLUSIVE, FLAGGED, or FAIL reports](assets/diagrams/pipeline.png)
 
 The checks are deliberately boring and deterministic:
 
@@ -69,11 +77,13 @@ The checks are deliberately boring and deterministic:
 - **loop**: did the agent repeat the same call (same tool, same arguments) or oscillate?
 - **budget**: steps, tokens, or duration over the limit?
 - **status**: did any span end in an error (e.g. a provider timeout)?
+- **evidence**: are parent references present and span ids unique?
 
 Each check emits *findings*, and a finding without evidence is not a
 finding. Findings carry the exact span ids, timestamps, and values.
-They map to a verdict. A critical finding means `FAIL`, a warning
-means `FLAGGED`, and a clean run means `PASS`.
+They map to a verdict. A critical behavior finding means `FAIL`, an
+evidence gap means `INCONCLUSIVE`, a warning means `FLAGGED`, and a
+clean run with complete evidence means `PASS`.
 
 ---
 
@@ -179,10 +189,16 @@ Rerun it yourself:
 
 ```sh
 make experiment           # offline matrix (free, deterministic)
+make experiment-evidence  # clean behavior with telemetry faults
 make experiment-live      # same matrix on real Gemini (needs GEMINI_API_KEY)
 make experiment-bedrock   # pilot with the DeepSeek judge on Bedrock
 make experiment-agreement # judge-vs-judge kappa matrix
 ```
+
+The evidence matrix has 120 cells: clean behavior across complete,
+dropped-parent, duplicate-span, and reordered-span telemetry. It reports
+false assurance and the rate of `INCONCLUSIVE` outcomes; reordered spans
+are a negative control because reconstruction should tolerate them.
 
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over

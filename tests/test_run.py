@@ -13,9 +13,10 @@ from harness.faults import FaultKind
 from harness.telemetry import HarnessTelemetry
 
 
-def cell(fault, verdict="FAIL", judged=False, findings=None, budget=None, seed=1):
+def cell(fault, verdict="FAIL", judged=False, findings=None, budget=None, seed=1, evidence_fault=None):
     return {
         "fault": fault, "seed": seed, "model": "flash", "run": 1,
+        "evidence_fault": evidence_fault,
         "verdict": verdict, "judged": judged,
         "findings": findings or [], "budget": budget or {"totalTokens": 100, "durationMs": 50},
     }
@@ -77,6 +78,19 @@ def test_render_table_is_well_formed():
     assert "overall detection" in table
     assert "malformed_json" in table
     assert "schema" in table
+
+
+def test_evidence_metrics_measure_false_assurance():
+    from experiments.analyze import false_assurance_rate, inconclusive_rate
+
+    results = [
+        cell(None, verdict="INCONCLUSIVE", evidence_fault="drop_parent"),
+        cell(None, verdict="PASS", evidence_fault="duplicate_span"),
+        cell(None, verdict="PASS", evidence_fault="reorder_spans"),
+        cell(None, verdict="PASS"),
+    ]
+    assert false_assurance_rate(results) == pytest.approx(0.5)
+    assert inconclusive_rate(results) == pytest.approx(0.5)
 
 
 def test_build_workers_offline_script_shape():
@@ -167,7 +181,7 @@ def test_verify_integrity():
     from experiments.analyze import cells_signature, verify_integrity
 
     artifact = {
-        "protocolVersion": "1",
+        "protocolVersion": "2",
         "cellsSignature": cells_signature([cell("loop")]),
         "cells": [cell("loop")],
     }

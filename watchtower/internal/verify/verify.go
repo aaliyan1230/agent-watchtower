@@ -4,8 +4,8 @@
 // reproducible from a checksummed trace, and it is what makes the
 // verifiers trivially testable (build a run, assert on findings).
 //
-// Verifiers never decide whether a finding is a failure — severity is
-// just data here; the report layer maps severities to verdicts.
+// Verifiers never decide the run-level outcome. Finding kind and severity
+// are data here; the report layer maps them to verdicts.
 package verify
 
 import (
@@ -30,16 +30,26 @@ func (s Severity) String() string {
 	}
 }
 
+// FindingKind distinguishes an observed violation from a gap in the
+// telemetry needed to establish a confident result.
+type FindingKind string
+
+const (
+	FindingViolation   FindingKind = "violation"
+	FindingEvidenceGap FindingKind = "evidence_gap"
+)
+
 // Finding is one verifier observation with evidence: the exact span IDs
 // that triggered it and the values involved. Evidence over opinion.
 type Finding struct {
-	Verifier   string   `json:"verifier"`
-	Severity   Severity `json:"severity"`
-	Message    string   `json:"message"`
-	SpanIDs    []string `json:"spanIds"`
-	Timestamps []string `json:"timestamps,omitempty"` // RFC3339 of offending spans
-	Value      string   `json:"value,omitempty"`      // the offending value, if any
-	Source     string   `json:"source,omitempty"`     // judge model, when a judge produced it
+	Verifier   string      `json:"verifier"`
+	Kind       FindingKind `json:"kind,omitempty"`
+	Severity   Severity    `json:"severity"`
+	Message    string      `json:"message"`
+	SpanIDs    []string    `json:"spanIds"`
+	Timestamps []string    `json:"timestamps,omitempty"` // RFC3339 of offending spans
+	Value      string      `json:"value,omitempty"`      // the offending value, if any
+	Source     string      `json:"source,omitempty"`     // judge model, when a judge produced it
 }
 
 // JudgeConfig is the JSON-configurable part of the judge slot. The
@@ -52,22 +62,30 @@ type JudgeConfig struct {
 	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
 }
 
+// EvidenceConfig controls the structural telemetry-integrity gate.
+// Keeping it opt-in preserves the zero-config behavior of the original
+// verifier while experiment configs can require complete evidence.
+type EvidenceConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // Config aggregates every verifier's configuration; zero values mean
 // "check disabled". WithDefaults fills in sensible defaults for the
 // optional knobs (loop thresholds). JSON tags map a config file onto
 // this struct directly.
 type Config struct {
-	Contracts []Contract  `json:"contracts"`
-	Policy    Policy      `json:"policy"`
-	Loop      LoopConfig  `json:"loop"`
-	Limits    Limits      `json:"limits"`
-	JudgeCfg  JudgeConfig `json:"judge"`
-	Judge     Judge       `json:"-"` // constructed by the CLI from JudgeCfg + env keys
+	Contracts []Contract     `json:"contracts"`
+	Policy    Policy         `json:"policy"`
+	Loop      LoopConfig     `json:"loop"`
+	Limits    Limits         `json:"limits"`
+	Evidence  EvidenceConfig `json:"evidence"`
+	JudgeCfg  JudgeConfig    `json:"judge"`
+	Judge     Judge          `json:"-"` // constructed by the CLI from JudgeCfg + env keys
 }
 
 // Verify runs every enabled verifier over the run and concatenates the
-// findings, keeping verifier order (schema, policy, loop, budget,
-// judge). Every check is opt-in: zero config verifies nothing. Judge
+// findings, keeping verifier order (schema, policy, loop, budget, status,
+// evidence, judge). Every check is opt-in: zero config verifies nothing. Judge
 // failures surface as findings rather than errors: the judge is a
 // supplement, its outage must not hide deterministic results.
 func Verify(run *graph.Run, cfg Config) []Finding {
@@ -79,6 +97,9 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 	}
 	out = append(out, CheckBudget(run, cfg.Limits)...)
 	out = append(out, CheckStatus(run)...)
+	if cfg.Evidence.Enabled {
+		out = append(out, CheckEvidence(run)...)
+	}
 	if cfg.Judge != nil {
 		if js, err := cfg.Judge.Run(run); err != nil {
 			out = append(out, Finding{
@@ -95,4 +116,4 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 
 // VerifierNames lists the deterministic verifiers, in run order — used
 // by the report and experiments for per-verifier detection rates.
-var VerifierNames = []string{"schema", "policy", "loop", "budget", "status"}
+var VerifierNames = []string{"schema", "policy", "loop", "budget", "status", "evidence"}

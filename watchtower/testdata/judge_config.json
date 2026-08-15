@@ -1,4 +1,5 @@
 {
   "judge": { "enabled": true, "model": "gemini-3.6-flash" },
-  "limits": { "maxSteps": 20 }
+  "limits": { "maxSteps": 20 },
+  "evidence": { "enabled": true }
 }

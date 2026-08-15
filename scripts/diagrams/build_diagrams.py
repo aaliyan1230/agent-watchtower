@@ -28,6 +28,7 @@ FAULT = "#fee2e2"
 SETUP = "#fce7f3"
 PASS = "#dcfce7"
 FAIL = "#fee2e2"
+GAP = "#ffedd5"
 INK = "#1e1e1e"
 
 _seed = [0]
@@ -186,27 +187,30 @@ def pipeline() -> None:
     checks = [
         ("Schema", "output contract"),
         ("Policy", "tool allowlist"),
-        ("Loop", "repeated or oscillating calls"),
+        ("Loop", "repeated calls"),
         ("Budget", "steps, tokens, time"),
-        ("Status", "provider and span errors"),
+        ("Status", "span errors"),
+        ("Evidence", "id and parent gaps"),
     ]
     for i, (name, detail) in enumerate(checks):
         y = 20 + i * 105
         box(e, 430, y, 280, 75, CORE, f"{name}: {detail}")
         arrow(e, 310, 250, 430, y + 38)
         arrow(e, 710, y + 38, 820, 250)
-    j = box(e, 430, 570, 280, 75, JUDGE, "Optional judge\nsemantic review")
-    arrow(e, 310, 250, 430, 608)
-    arrow(e, 710, 608, 820, 250)
+    j = box(e, 430, 650, 280, 75, JUDGE, "Optional judge\nsemantic review")
+    arrow(e, 310, 250, 430, 688)
+    arrow(e, 710, 688, 820, 250)
     f = box(e, 820, 205, 300, 90, RESULT, "Finding\nverifier, severity, evidence")
     m = box(e, 1230, 205, 300, 90, RESULT, "Severity mapping\nhighest finding wins")
     arrow(e, 1120, 250, 1230, 250)
     p = box(e, 1660, 50, 260, 70, PASS, "PASS: no findings")
-    w = box(e, 1660, 205, 260, 70, JUDGE, "FLAGGED: warning")
-    fail = box(e, 1660, 360, 260, 70, FAIL, "FAIL: critical")
+    w = box(e, 1660, 175, 260, 70, JUDGE, "FLAGGED: warning")
+    inc = box(e, 1660, 300, 260, 70, GAP, "INCONCLUSIVE: gap")
+    fail = box(e, 1660, 425, 260, 70, FAIL, "FAIL: critical")
     arrow(e, 1530, 250, 1660, 85, "clean", label_dy=-8)
-    arrow(e, 1530, 250, 1660, 240, "warning")
-    arrow(e, 1530, 250, 1660, 395, "critical", label_dy=8)
+    arrow(e, 1530, 250, 1660, 210, "warning")
+    arrow(e, 1530, 250, 1660, 335, "evidence gap")
+    arrow(e, 1530, 250, 1660, 460, "critical", label_dy=8)
     save("pipeline", e)
 
 
@@ -233,10 +237,50 @@ def experiment() -> None:
     save("experiment", e)
 
 
+def evidence_flow() -> None:
+    """Flow for evidence-aware supervision experiments.
+
+    Keep this separate from the original pipeline diagram: it shows the
+    new research variable, evidence quality, without changing the
+    existing architecture drawing until the verifier contract is stable.
+    """
+    e: list[dict] = []
+    supervisor = box(e, 40, 100, 270, 90, SETUP, "Supervisor meta-agent\ndecides accept, retry,\nblock, or escalate")
+    workers = box(e, 390, 100, 250, 90, SOURCE, "Worker agents\nproduce results")
+    behavior = box(e, 720, 35, 285, 90, FAULT, "Behavior faults\nside effects, drift,\npolicy or goal gaming")
+    telemetry = box(e, 720, 190, 285, 90, GAP, "Evidence faults\ndropped, duplicate,\nlate, or forged spans")
+    trace = box(e, 1085, 100, 285, 105, WIRE, "OTLP trace\nbehavior + telemetry\narrive as evidence")
+    reconstruct = box(e, 1450, 100, 310, 105, CORE, "Reconstruct run\nordered steps + evidence\nquality inventory")
+    checks = box(e, 1840, 35, 300, 90, CORE, "Deterministic checks\nproperties + evidence\nobligations")
+    judge = box(e, 1840, 190, 300, 90, JUDGE, "Optional LLM judge\nsemantic second opinion")
+    report = box(e, 2220, 100, 300, 105, RESULT, "Evidence report\nfindings, spans,\nconfidence state")
+    passed = box(e, 2600, 10, 230, 62, PASS, "PASS\nsufficient evidence")
+    inconclusive = box(e, 2600, 92, 230, 78, GAP, "INCONCLUSIVE\nevidence gap")
+    flagged = box(e, 2600, 190, 230, 62, JUDGE, "FLAGGED\nwarning")
+    failed = box(e, 2600, 272, 230, 62, FAIL, "FAIL\nobserved violation")
+
+    arrow(e, 310, 145, 390, 145, "delegates")
+    arrow(e, 640, 145, 720, 80, "run")
+    arrow(e, 640, 145, 720, 235, "telemetry")
+    arrow(e, 1005, 80, 1085, 145, "behavior")
+    arrow(e, 1005, 235, 1085, 165, "evidence")
+    arrow(e, 1370, 152, 1450, 152)
+    arrow(e, 1760, 152, 1840, 80)
+    arrow(e, 1760, 152, 1840, 235)
+    arrow(e, 2140, 80, 2220, 145)
+    arrow(e, 2140, 235, 2220, 160)
+    arrow(e, 2520, 150, 2600, 40, "clean")
+    arrow(e, 2520, 150, 2600, 130, "gap")
+    arrow(e, 2520, 150, 2600, 220, "warning")
+    arrow(e, 2520, 150, 2600, 302, "critical")
+    save("evidence_flow", e)
+
+
 def main() -> None:
     architecture()
     pipeline()
     experiment()
+    evidence_flow()
     print(f"wrote {len(list(OUT.glob('*.excalidraw')))} diagrams -> {OUT}")
 
 

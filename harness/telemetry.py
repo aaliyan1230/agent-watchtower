@@ -19,7 +19,7 @@ import httpx
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 from opentelemetry.sdk.trace import Tracer, TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.trace import set_tracer_provider
 
 # The SDK allows one global provider per process; experiments create a
@@ -27,18 +27,54 @@ from opentelemetry.trace import set_tracer_provider
 _global_provider_set = False
 
 
+class EvidenceFaultExporter(SpanExporter):
+    """Apply a transport fault immediately before OTLP serialization.
+
+    The inner exporter remains the official OTLP/HTTP exporter. This
+    wrapper changes only the exported batch, which keeps evidence faults
+    outside the agent and makes them reproducible in the experiment layer.
+    """
+
+    def __init__(self, inner: SpanExporter, fault: str):
+        self._inner = inner
+        self._fault = fault
+
+    def export(self, spans) -> SpanExportResult:
+        batch = list(spans)
+        if self._fault == "drop_parent":
+            batch = [
+                span
+                for span in batch
+                if not (span.name == "agent.run" and span.parent is None)
+            ]
+        elif self._fault == "duplicate_span" and batch:
+            batch.append(batch[-1])
+        elif self._fault == "reorder_spans":
+            batch.reverse()
+        return self._inner.export(batch)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
 class HarnessTelemetry:
     """Owns the tracer used by workers and supervisor. BatchSpanProcessor
     accumulates spans until flush() — one export per run, which is what
     the Go graph reconstructor expects (one trace per request)."""
 
-    def __init__(self, endpoint: str, service_name: str = "harness"):
+    def __init__(self, endpoint: str, service_name: str = "harness", evidence_fault: str | None = None):
         global _global_provider_set
         self._endpoint = endpoint.rstrip("/")
         # An explicit `endpoint` is used verbatim as the export URL (the
         # /v1/traces suffix is only appended for the env-var default),
         # so the full path goes here.
-        self._exporter = OTLPSpanExporter(endpoint=self._endpoint + "/v1/traces")
+        exporter: SpanExporter = OTLPSpanExporter(endpoint=self._endpoint + "/v1/traces")
+        if evidence_fault:
+            exporter = EvidenceFaultExporter(exporter, evidence_fault)
+        self._exporter = exporter
         provider = TracerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
         self._processor = BatchSpanProcessor(self._exporter)
         provider.add_span_processor(self._processor)

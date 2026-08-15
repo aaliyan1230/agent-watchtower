@@ -39,6 +39,18 @@ class FaultKind(Enum):
     PROVIDER_TIMEOUT = "provider_timeout"  # call raises
 
 
+class EvidenceFaultKind(Enum):
+    """Faults applied after the agent has produced its spans.
+
+    These do not change agent behavior. They model what a collector or
+    transport can do to the evidence that a supervisor sees.
+    """
+
+    DROP_PARENT = "drop_parent"  # remove a root span, leaving children orphaned
+    DUPLICATE_SPAN = "duplicate_span"  # send one span twice
+    REORDER_SPANS = "reorder_spans"  # reverse a batch; reconstruction should tolerate it
+
+
 @dataclass
 class FaultSpec:
     kind: FaultKind

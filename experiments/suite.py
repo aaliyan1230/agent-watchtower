@@ -14,12 +14,12 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from harness.faults import FaultKind
+from harness.faults import EvidenceFaultKind, FaultKind
 
 # Frozen-protocol marker: bump when the experiment definition changes
 # (fault steps, scripts, configs) so old artifacts are never compared
 # silently against new ones.
-PROTOCOL_VERSION = "1"
+PROTOCOL_VERSION = "2"
 
 MODEL_VARIANTS = ["flash", "pro"]  # cheap tier for bulk, pro tier for a stratified sample
 SEEDS = [1, 2, 3, 4, 5]  # sized from pilot results in Phase 2
@@ -35,6 +35,7 @@ class ExperimentCell:
     seed: int
     model: str
     run: int
+    evidence_fault: str | None = None
 
 
 def build_grid(
@@ -53,6 +54,34 @@ def build_grid(
     return cells
 
 
+def build_evidence_grid(
+    seeds: list[int] = SEEDS,
+    models: list[str] = MODEL_VARIANTS,
+    runs: int = RUNS_PER_CELL,
+) -> list[ExperimentCell]:
+    """Build a clean-behavior grid with controlled telemetry faults.
+
+    Keeping behavior clean isolates false assurance caused by evidence
+    loss or duplication. The same cell shape feeds the existing runner.
+    """
+    evidence_faults = [None, *(f.value for f in EvidenceFaultKind)]
+    cells: list[ExperimentCell] = []
+    for evidence_fault in evidence_faults:
+        for seed in seeds:
+            for model in models:
+                for run in range(1, runs + 1):
+                    cells.append(
+                        ExperimentCell(
+                            fault=None,
+                            seed=seed,
+                            model=model,
+                            run=run,
+                            evidence_fault=evidence_fault,
+                        )
+                    )
+    return cells
+
+
 def checksum(cells: list[ExperimentCell]) -> str:
     """Grid identity: same cells, same sha256. Artifacts produced from
     a grid are labelled with this so results can be attributed."""
@@ -64,12 +93,14 @@ def checksum(cells: list[ExperimentCell]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="build the experiment grid")
     parser.add_argument("--out", type=Path, default=Path("artifacts"))
+    parser.add_argument("--evidence", action="store_true", help="build the clean-behavior telemetry-fault grid")
     args = parser.parse_args()
 
-    cells = build_grid()
+    cells = build_evidence_grid() if args.evidence else build_grid()
     args.out.mkdir(parents=True, exist_ok=True)
     manifest = {
         "protocolVersion": PROTOCOL_VERSION,
+        "gridKind": "evidence" if args.evidence else "behavior",
         "checksum": checksum(cells),
         "cells": [asdict(c) for c in cells],
     }

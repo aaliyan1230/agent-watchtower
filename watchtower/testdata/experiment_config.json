@@ -11,5 +11,6 @@
   ],
   "policy": { "allowedTools": ["search"] },
   "loop": { "enabled": true },
-  "limits": { "maxSteps": 8, "maxTotalTokens": 300, "maxDurationMs": 60000 }
+  "limits": { "maxSteps": 8, "maxTotalTokens": 300, "maxDurationMs": 60000 },
+  "evidence": { "enabled": true }
 }

@@ -1,8 +1,8 @@
 // Package report turns findings into a verdict and bundles the evidence:
 // the exact span IDs, timestamps, and values behind every verdict — the
 // "evidence over opinion" contract of the whole project. Verdicts are
-// derived purely: any critical finding fails the run, any warning flags
-// it, nothing passes it.
+// derived purely: critical violations fail, evidence gaps become
+// inconclusive, warnings flag, and a clean complete trace passes.
 package report
 
 import (
@@ -13,18 +13,19 @@ import (
 )
 
 // ProtocolVersion freezes the verdict semantics: verdict mapping,
-// finding schema, budget fields. Bump it when any of those change —
+// finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.6"
+const ProtocolVersion = "0.7"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
 
 const (
-	VerdictPass    Verdict = "PASS"
-	VerdictFlagged Verdict = "FLAGGED"
-	VerdictFail    Verdict = "FAIL"
+	VerdictPass         Verdict = "PASS"
+	VerdictFlagged      Verdict = "FLAGGED"
+	VerdictInconclusive Verdict = "INCONCLUSIVE"
+	VerdictFail         Verdict = "FAIL"
 )
 
 // VerifierSummary is the per-verifier account the experiments layer
@@ -54,6 +55,7 @@ type Report struct {
 	Findings        []verify.Finding  `json:"findings,omitempty"`
 	Verifiers       []VerifierSummary `json:"verifiers"`
 	Budget          graph.Budget      `json:"budget"`
+	Evidence        graph.Evidence    `json:"evidence"`
 	GeneratedAt     time.Time         `json:"generatedAt"`
 }
 
@@ -67,6 +69,7 @@ func Build(run *graph.Run, findings []verify.Finding, judged bool) *Report {
 		Judged:          judged,
 		Findings:        findings,
 		Budget:          run.Budget,
+		Evidence:        run.Evidence,
 		GeneratedAt:     time.Now().UTC(),
 	}
 	r.Verifiers = summarize(findings, judged)
@@ -78,11 +81,17 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 	r.JudgeUsage = JudgeUsage{InputTokens: input, OutputTokens: output}
 }
 
-// verdictFor maps findings to a verdict: critical -> FAIL,
-// warning -> FLAGGED, else PASS.
+// verdictFor maps findings to a verdict. A direct critical violation
+// fails first; an evidence gap is INCONCLUSIVE rather than a failure;
+// ordinary warnings retain the legacy FLAGGED outcome.
 func verdictFor(findings []verify.Finding) Verdict {
 	critical, warning := false, false
+	evidenceGap := false
 	for _, f := range findings {
+		if f.Kind == verify.FindingEvidenceGap {
+			evidenceGap = true
+			continue
+		}
 		switch f.Severity {
 		case verify.SeverityCritical:
 			critical = true
@@ -93,6 +102,8 @@ func verdictFor(findings []verify.Finding) Verdict {
 	switch {
 	case critical:
 		return VerdictFail
+	case evidenceGap:
+		return VerdictInconclusive
 	case warning:
 		return VerdictFlagged
 	default:

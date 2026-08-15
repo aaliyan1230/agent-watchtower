@@ -3,6 +3,7 @@ package verify
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
 )
@@ -86,5 +87,31 @@ func TestVerifyNoJudge(t *testing.T) {
 	}
 	if f := Verify(run, cfg); len(f) != 0 {
 		t.Fatalf("findings = %+v, want none", f)
+	}
+}
+
+func TestVerifyEvidenceGapsBecomeEvidenceFindings(t *testing.T) {
+	run := &graph.Run{
+		Steps: []graph.Step{{SpanID: "child", StartTime: time.Unix(1, 0).UTC()}},
+		Evidence: graph.Evidence{
+			DuplicateSpanIDs: []string{"dup"},
+			MissingParents:   []graph.MissingParent{{SpanID: "child", ParentID: "parent"}},
+		},
+	}
+	findings := Verify(run, Config{Evidence: EvidenceConfig{Enabled: true}})
+	if len(findings) != 2 {
+		t.Fatalf("findings = %+v, want two evidence findings", findings)
+	}
+	for _, finding := range findings {
+		if finding.Verifier != "evidence" || finding.Kind != FindingEvidenceGap || finding.Severity != SeverityWarning {
+			t.Errorf("finding = %+v, want evidence/evidence_gap/warning", finding)
+		}
+	}
+}
+
+func TestVerifyEvidenceDisabledPreservesZeroConfig(t *testing.T) {
+	run := &graph.Run{Evidence: graph.Evidence{MissingParents: []graph.MissingParent{{SpanID: "child", ParentID: "parent"}}}}
+	if findings := Verify(run, Config{}); len(findings) != 0 {
+		t.Fatalf("findings = %+v, want none with evidence check disabled", findings)
 	}
 }

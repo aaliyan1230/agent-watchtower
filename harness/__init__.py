@@ -5,8 +5,8 @@ reconstructs, verifies, and returns an evidence-backed verdict.
 """
 
 from .providers import FakeProvider, GeminiProvider, Provider, ProviderResponse
-from .faults import FaultInjector, FaultKind, FaultSpec
-from .telemetry import HarnessTelemetry
+from .faults import EvidenceFaultKind, FaultInjector, FaultKind, FaultSpec
+from .telemetry import EvidenceFaultExporter, HarnessTelemetry
 from .workers import Tool, Worker
 from .supervisor import Supervisor
 
@@ -17,7 +17,9 @@ __all__ = [
     "ProviderResponse",
     "FaultInjector",
     "FaultKind",
+    "EvidenceFaultKind",
     "FaultSpec",
+    "EvidenceFaultExporter",
     "HarnessTelemetry",
     "Tool",
     "Worker",
