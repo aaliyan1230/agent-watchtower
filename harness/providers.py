@@ -10,6 +10,7 @@ point it at a mock server.
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 from abc import ABC, abstractmethod
@@ -68,9 +69,15 @@ class FakeProvider(Provider):
     def chat(self, messages, tools=None, *, contract=None, temperature=0.0):
         if self._cursor >= len(self._script):
             raise RuntimeError(f"FakeProvider script exhausted after {len(self._script)} turns")
-        resp = self._script[self._cursor]
+        # Copy scripted responses so repeated tool turns receive fresh,
+        # unique ids and one experiment cell cannot mutate the fixture
+        # used by the next cell.
+        resp = copy.deepcopy(self._script[self._cursor])
+        turn = self._cursor
         self._cursor += 1
         if resp.tool_calls:
+            for i, tc in enumerate(resp.tool_calls):
+                tc["id"] = tc.get("id") or f"call-{turn}-{i}"
             resp.assistant_message = {
                 "role": "assistant",
                 "tool_calls": [

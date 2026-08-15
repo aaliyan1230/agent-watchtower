@@ -49,6 +49,11 @@ class EvidenceFaultKind(Enum):
     DROP_PARENT = "drop_parent"  # remove a root span, leaving children orphaned
     DUPLICATE_SPAN = "duplicate_span"  # send one span twice
     REORDER_SPANS = "reorder_spans"  # reverse a batch; reconstruction should tolerate it
+    DROP_CHILD = "drop_child"  # remove a worker lifecycle span, leaving its children orphaned
+    DROP_TOOL_RESULT = "drop_tool_result"  # remove tool result spans while calls remain
+    MISMATCH_TOOL_ID = "mismatch_tool_id"  # replace a result id with an unpaired id
+    TRUNCATE_FINAL = "truncate_final"  # remove the final-answer evidence markers
+    LATE_SPAN = "late_span"  # move a child outside its parent's time window
 
 
 @dataclass

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
+	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/model"
 )
 
 type stubJudge struct {
@@ -113,5 +114,83 @@ func TestVerifyEvidenceDisabledPreservesZeroConfig(t *testing.T) {
 	run := &graph.Run{Evidence: graph.Evidence{MissingParents: []graph.MissingParent{{SpanID: "child", ParentID: "parent"}}}}
 	if findings := Verify(run, Config{}); len(findings) != 0 {
 		t.Fatalf("findings = %+v, want none with evidence check disabled", findings)
+	}
+}
+
+func TestVerifyEvidenceObligationsAcceptCompleteRun(t *testing.T) {
+	base := time.Unix(10, 0).UTC()
+	run := &graph.Run{
+		RootSpanID: "root",
+		Steps: []graph.Step{
+			{
+				SpanID: "root", Name: "agent.run", Kind: graph.StepAgent,
+				StartTime: base, EndTime: base.Add(5 * time.Second),
+				Attributes: map[string]string{model.WatchtowerCompleted: "true"},
+				Events:     []model.Event{{Name: "supervisor.decision", Attributes: map[string]string{"action": "complete"}}},
+			},
+			{
+				SpanID: "llm", ParentID: "root", Name: "chat", Kind: graph.StepLLM,
+				Model: "fake", ResponseModel: "fake", System: "fake",
+				StartTime: base.Add(time.Second), EndTime: base.Add(2 * time.Second),
+				Attributes: map[string]string{
+					model.GenAIRequestModel:     "fake",
+					model.GenAIResponseModel:    "fake",
+					model.GenAISystem:           "fake",
+					model.WatchtowerFinal:       "true",
+					model.WatchtowerOutput:      "done",
+					model.WatchtowerToolCallIDs: `["call-1"]`,
+				},
+				ToolCallIDs: []string{"call-1"},
+			},
+			{
+				SpanID: "tool", ParentID: "root", Name: "tool.call", Kind: graph.StepTool,
+				ToolCallID: "call-1", StartTime: base.Add(2 * time.Second), EndTime: base.Add(3 * time.Second),
+				Attributes: map[string]string{model.ToolCallID: "call-1", model.ToolResultOK: "true"},
+			},
+		},
+	}
+	obligations := EvidenceObligations{
+		RequireRoot: true, RequireAgentCompletion: true, RequireModelCorrelation: true,
+		RequireToolResults: true, RequireFinalAnswer: true,
+		RequireSupervisorDecision: true, RequireTemporalNesting: true,
+	}
+	if findings := CheckEvidence(run, obligations); len(findings) != 0 {
+		t.Fatalf("findings = %+v, want complete evidence", findings)
+	}
+}
+
+func TestVerifyEvidenceObligationsReportGaps(t *testing.T) {
+	base := time.Unix(10, 0).UTC()
+	run := &graph.Run{
+		RootSpanID: "root",
+		Steps: []graph.Step{
+			{
+				SpanID: "root", Name: "agent.run", Kind: graph.StepAgent,
+				StartTime: base, EndTime: base.Add(time.Second),
+				Attributes: map[string]string{model.WatchtowerCompleted: "true"},
+			},
+			{
+				SpanID: "llm", ParentID: "root", Name: "chat", Kind: graph.StepLLM,
+				Model: "fake", ResponseModel: "fake", System: "fake",
+				StartTime: base.Add(2 * time.Second), EndTime: base.Add(3 * time.Second),
+				Attributes: map[string]string{
+					model.WatchtowerToolCallIDs: `["missing-call"]`,
+				},
+				ToolCallIDs: []string{"missing-call"},
+			},
+		},
+	}
+	findings := CheckEvidence(run, EvidenceObligations{
+		RequireRoot: true, RequireAgentCompletion: true, RequireModelCorrelation: true,
+		RequireToolResults: true, RequireFinalAnswer: true,
+		RequireSupervisorDecision: true, RequireTemporalNesting: true,
+	})
+	if len(findings) < 4 {
+		t.Fatalf("findings = %+v, want multiple obligation gaps", findings)
+	}
+	for _, finding := range findings {
+		if finding.Kind != FindingEvidenceGap || finding.Verifier != "evidence" {
+			t.Errorf("finding = %+v, want evidence gap", finding)
+		}
 	}
 }

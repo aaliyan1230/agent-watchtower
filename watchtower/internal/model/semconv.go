@@ -31,6 +31,14 @@ const (
 	AgentID   = "agent.id"
 	StepIndex = "agent.step" // ours: 0-based step number within the agent
 
+	// Lifecycle and correlation markers emitted by the harness. These are
+	// deliberately small obligations: they make absence observable without
+	// pretending that a trace can prove every semantic claim.
+	WatchtowerCompleted   = "watchtower.completed"
+	WatchtowerFinal       = "watchtower.final"
+	WatchtowerOutcome     = "watchtower.outcome"
+	WatchtowerToolCallIDs = "watchtower.tool.call.ids"
+
 	// Watchtower-specific: structured-output contract checking. The
 	// harness stamps the contract name it is supposed to honor and the
 	// raw model output; the schema verifier parses and checks it.

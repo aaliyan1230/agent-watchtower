@@ -1,5 +1,16 @@
 {
   "judge": { "enabled": true, "model": "gemini-3.6-flash" },
   "limits": { "maxSteps": 20 },
-  "evidence": { "enabled": true }
+  "evidence": {
+    "enabled": true,
+    "obligations": {
+      "requireRoot": true,
+      "requireAgentCompletion": true,
+      "requireModelCorrelation": true,
+      "requireToolResults": true,
+      "requireFinalAnswer": true,
+      "requireSupervisorDecision": true,
+      "requireTemporalNesting": true
+    }
+  }
 }

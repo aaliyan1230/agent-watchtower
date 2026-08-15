@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace import Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.trace import set_tracer_provider
@@ -31,7 +32,8 @@ class EvidenceFaultExporter(SpanExporter):
     """Apply a transport fault immediately before OTLP serialization.
 
     The inner exporter remains the official OTLP/HTTP exporter. This
-    wrapper changes only the exported batch, which keeps evidence faults
+    wrapper changes only the exported batch (drop, duplicate, reorder,
+    mismatch, truncation, or late timestamps), which keeps evidence faults
     outside the agent and makes them reproducible in the experiment layer.
     """
 
@@ -51,7 +53,57 @@ class EvidenceFaultExporter(SpanExporter):
             batch.append(batch[-1])
         elif self._fault == "reorder_spans":
             batch.reverse()
+        elif self._fault == "drop_child":
+            batch = [
+                span
+                for span in batch
+                if not (span.name == "agent.run" and span.parent is not None)
+            ]
+        elif self._fault == "drop_tool_result":
+            batch = [span for span in batch if span.name != "tool.call"]
+        elif self._fault == "mismatch_tool_id":
+            batch = self._rewrite_first_tool_id(batch)
+        elif self._fault == "truncate_final":
+            batch = self._truncate_final_markers(batch)
+        elif self._fault == "late_span":
+            batch = self._move_first_child_late(batch)
         return self._inner.export(batch)
+
+    @staticmethod
+    def _rewrite_first_tool_id(batch):
+        for i, span in enumerate(batch):
+            if span.name != "tool.call":
+                continue
+            attrs = dict(span.attributes)
+            attrs["tool.call.id"] = "forged-tool-result-id"
+            batch[i] = _clone_span(span, attributes=attrs)
+            break
+        return batch
+
+    @staticmethod
+    def _truncate_final_markers(batch):
+        for i, span in enumerate(batch):
+            attrs = dict(span.attributes)
+            changed = False
+            for key in ("watchtower.final", "watchtower.output", "watchtower.contract"):
+                if key in attrs:
+                    del attrs[key]
+                    changed = True
+            if changed:
+                batch[i] = _clone_span(span, attributes=attrs)
+        return batch
+
+    @staticmethod
+    def _move_first_child_late(batch):
+        latest_end = max((span.end_time or 0) for span in batch)
+        for i, span in enumerate(batch):
+            if span.parent is None or span.start_time is None or span.end_time is None:
+                continue
+            duration = max(1_000_000, span.end_time - span.start_time)
+            start = latest_end + 1_000_000
+            batch[i] = _clone_span(span, start_time=start, end_time=start + duration)
+            break
+        return batch
 
     def shutdown(self) -> None:
         self._inner.shutdown()
@@ -112,3 +164,27 @@ class HarnessTelemetry:
         # current SDKs — calling exporter.shutdown again would double
         # shut down and log a warning.
         self._processor.shutdown()
+
+
+def _clone_span(span, *, attributes=None, start_time=None, end_time=None):
+    """Clone an SDK span while changing only the evidence fault field.
+
+    The exporter receives immutable ReadableSpan objects. Keeping the
+    clone at this boundary makes faults transport-only and leaves agent
+    execution untouched.
+    """
+    return ReadableSpan(
+        name=span.name,
+        context=span.context,
+        parent=span.parent,
+        resource=span.resource,
+        attributes=dict(span.attributes) if attributes is None else attributes,
+        events=span.events,
+        links=span.links,
+        kind=span.kind,
+        instrumentation_info=getattr(span, "instrumentation_info", None),
+        status=span.status,
+        start_time=span.start_time if start_time is None else start_time,
+        end_time=span.end_time if end_time is None else end_time,
+        instrumentation_scope=getattr(span, "instrumentation_scope", None),
+    )

@@ -55,9 +55,18 @@ class _StubExporter:
 
 
 class _Span:
-    def __init__(self, name, parent=None):
+    def __init__(self, name, parent=None, attributes=None):
         self.name = name
         self.parent = parent
+        self.context = None
+        self.resource = None
+        self.attributes = attributes or {}
+        self.events = ()
+        self.links = ()
+        self.kind = None
+        self.status = None
+        self.start_time = 1
+        self.end_time = 2
 
 
 def test_evidence_fault_exporter_changes_only_export_batch():
@@ -77,3 +86,21 @@ def test_evidence_fault_exporter_changes_only_export_batch():
     reorder_inner = _StubExporter()
     EvidenceFaultExporter(reorder_inner, "reorder_spans").export([root, child])
     assert reorder_inner.batches[-1] == [child, root]
+
+    mismatch_inner = _StubExporter()
+    tool = _Span("tool.call", parent=root, attributes={"tool.call.id": "call-1"})
+    EvidenceFaultExporter(mismatch_inner, "mismatch_tool_id").export([tool])
+    assert mismatch_inner.batches[-1][0].attributes["tool.call.id"] == "forged-tool-result-id"
+
+    truncate_inner = _StubExporter()
+    final = _Span("chat", parent=root, attributes={
+        "watchtower.final": "true",
+        "watchtower.output": "done",
+        "watchtower.contract": "ticket",
+    })
+    EvidenceFaultExporter(truncate_inner, "truncate_final").export([final])
+    assert truncate_inner.batches[-1][0].attributes == {}
+
+    late_inner = _StubExporter()
+    EvidenceFaultExporter(late_inner, "late_span").export([root, child])
+    assert late_inner.batches[-1][1].start_time > root.end_time

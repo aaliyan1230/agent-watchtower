@@ -343,7 +343,7 @@ def verify_integrity(artifact: Mapping) -> str:
     problems = []
     if cells_signature(artifact.get("cells", [])) != artifact.get("cellsSignature"):
         problems.append("cellsSignature mismatch (artifact tampered or truncated)")
-    if artifact.get("protocolVersion") != "2":
+    if artifact.get("protocolVersion") != "3":
         problems.append(f"unknown suite protocol {artifact.get('protocolVersion')!r}")
     return "; ".join(problems) or "ok"
 

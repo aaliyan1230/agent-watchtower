@@ -7,8 +7,10 @@
 package graph
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/model"
@@ -27,25 +29,30 @@ const (
 // Tool-specific fields are populated only for StepTool steps; model and
 // token fields only for StepLLM steps.
 type Step struct {
-	Order        int // 1-based position in the run
-	SpanID       string
-	Agent        string // agent.name
-	Kind         StepKind
-	Name         string
-	Model        string // gen_ai.request.model
-	System       string // gen_ai.system
-	Tool         string // tool.name
-	ToolCallID   string // tool.call.id
-	ToolOK       bool   // tool.result.ok
-	ToolArgs     string // watchtower.tool.args (JSON string)
-	Contract     string // watchtower.contract
-	Output       string // watchtower.output (raw model output)
-	InputTokens  int64
-	OutputTokens int64
-	Status       model.StatusCode
-	StatusMsg    string
-	StartTime    time.Time
-	EndTime      time.Time
+	Order         int // 1-based position in the run
+	SpanID        string
+	ParentID      string
+	Agent         string // agent.name
+	Kind          StepKind
+	Name          string
+	Model         string   // gen_ai.request.model
+	ResponseModel string   // gen_ai.response.model
+	System        string   // gen_ai.system
+	Tool          string   // tool.name
+	ToolCallID    string   // tool.call.id
+	ToolCallIDs   []string // model-declared tool calls expected to produce results
+	ToolOK        bool     // tool.result.ok
+	ToolArgs      string   // watchtower.tool.args (JSON string)
+	Contract      string   // watchtower.contract
+	Output        string   // watchtower.output (raw model output)
+	Attributes    map[string]string
+	Events        []model.Event
+	InputTokens   int64
+	OutputTokens  int64
+	Status        model.StatusCode
+	StatusMsg     string
+	StartTime     time.Time
+	EndTime       time.Time
 }
 
 // Budget summarizes resource consumption for the budget verifier and
@@ -203,12 +210,15 @@ func stepFrom(s *model.Span, order int) Step {
 	st := Step{
 		Order:     order,
 		SpanID:    s.SpanID,
+		ParentID:  s.ParentID,
 		Name:      s.Name,
 		Status:    s.Status,
 		StatusMsg: s.StatusMsg,
 		StartTime: s.StartTime,
 		EndTime:   s.EndTime,
 	}
+	st.Attributes = cloneAttributes(s.Attributes)
+	st.Events = append([]model.Event(nil), s.Events...)
 	st.Agent, _ = s.Attr(model.AgentName)
 	st.Contract, _ = s.Attr(model.WatchtowerContract)
 	st.Output, _ = s.Attr(model.WatchtowerOutput)
@@ -217,6 +227,7 @@ func stepFrom(s *model.Span, order int) Step {
 		st.Kind = StepTool
 		st.Tool = tool
 		st.ToolCallID, _ = s.Attr(model.ToolCallID)
+		st.ToolCallIDs = parseToolCallIDs(s)
 		st.ToolOK, _ = s.AttrBool(model.ToolResultOK)
 		st.ToolArgs, _ = s.Attr(model.WatchtowerToolArgs)
 		return st
@@ -224,13 +235,43 @@ func stepFrom(s *model.Span, order int) Step {
 	if op, ok := s.Attr(model.GenAIOperationName); ok && op != "" {
 		st.Kind = StepLLM
 		st.Model, _ = s.Attr(model.GenAIRequestModel)
+		st.ResponseModel, _ = s.Attr(model.GenAIResponseModel)
 		st.System, _ = s.Attr(model.GenAISystem)
+		st.ToolCallIDs = parseToolCallIDs(s)
 		st.InputTokens, _ = s.AttrInt(model.GenAIInputTokens)
 		st.OutputTokens, _ = s.AttrInt(model.GenAIOutputTokens)
 		return st
 	}
 	st.Kind = StepAgent
 	return st
+}
+
+func cloneAttributes(attrs map[string]string) map[string]string {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(attrs))
+	for k, v := range attrs {
+		out[k] = v
+	}
+	return out
+}
+
+func parseToolCallIDs(s *model.Span) []string {
+	raw, ok := s.Attr(model.WatchtowerToolCallIDs)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err == nil {
+		return ids
+	}
+	for _, id := range strings.Split(raw, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // summarize aggregates the budget over steps: span count, LLM/tool

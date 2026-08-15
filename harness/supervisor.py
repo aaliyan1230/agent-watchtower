@@ -81,6 +81,16 @@ class Supervisor:
                 result.answers[worker.name] = answer
                 result.steps_taken[worker.name] = state.steps
                 idx += 1
+            root.add_event(
+                "supervisor.decision",
+                {
+                    "action": "escalate" if result.escalation else "complete",
+                    "reason": "worker halted" if result.escalation else "all workers completed",
+                    "step": str(sum(result.steps_taken.values())),
+                },
+            )
+            root.set_attribute(semconv.WATCHTOWER_COMPLETED, True)
+            root.set_attribute(semconv.WATCHTOWER_OUTCOME, "escalated" if result.escalation else "complete")
         return result
 
     def _decide(self, info: StepInfo, worker: Worker, state: _WorkerState, queue: list[Worker], idx: int, root) -> str:

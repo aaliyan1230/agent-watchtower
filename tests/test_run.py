@@ -181,7 +181,7 @@ def test_verify_integrity():
     from experiments.analyze import cells_signature, verify_integrity
 
     artifact = {
-        "protocolVersion": "2",
+        "protocolVersion": "3",
         "cellsSignature": cells_signature([cell("loop")]),
         "cells": [cell("loop")],
     }

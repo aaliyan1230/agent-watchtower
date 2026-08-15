@@ -101,37 +101,48 @@ class Worker:
             {"role": "user", "content": task},
         ]
         tool_schemas = [t.schema() for t in self._tools.values()]
-        token = self._tracer.start_as_current_span(
+        with self._tracer.start_as_current_span(
             "agent.run", context=parent_context, attributes={semconv.AGENT_NAME: self.name}
-        )
-
-        with token:
-            for step in range(1, self.max_steps + 1):
-                resp = self._turn(messages, tool_schemas, step)
-                if resp.tool_calls:
-                    # The assistant turn must precede its tool results
-                    # in history (Gemini's compat endpoint requires the
-                    # model's own message, thought_signature included).
-                    if resp.assistant_message:
-                        messages.append(resp.assistant_message)
-                    for tc in resp.tool_calls:
-                        ok, result = self._exec_tool(tc, step)
-                        messages.append({"role": "tool", "content": result, "tool_call_id": tc.get("id", "")})
-                        if monitor:
-                            action = monitor(StepInfo(
-                                worker=self.name, step=step, kind="tool",
-                                tool=tc["name"], tool_ok=ok,
-                                tokens=resp.input_tokens + resp.output_tokens,
-                            ))
-                            if action != "continue":
-                                return self._stop(action)
-                    continue
-                if monitor:
-                    action = monitor(StepInfo(worker=self.name, step=step, kind="llm", tokens=resp.input_tokens + resp.output_tokens))
-                    if action != "continue":
-                        return self._stop(action)
-                return _strip_fences(resp.content)
-        return "(no final answer within max_steps)"
+        ) as run_span:
+            final = False
+            answer = ""
+            try:
+                for step in range(1, self.max_steps + 1):
+                    resp = self._turn(messages, tool_schemas, step)
+                    if resp.tool_calls:
+                        # The assistant turn must precede its tool results
+                        # in history (Gemini's compat endpoint requires the
+                        # model's own message, thought_signature included).
+                        if resp.assistant_message:
+                            messages.append(resp.assistant_message)
+                        for tc in resp.tool_calls:
+                            ok, result = self._exec_tool(tc, step)
+                            messages.append({"role": "tool", "content": result, "tool_call_id": tc.get("id", "")})
+                            if monitor:
+                                action = monitor(StepInfo(
+                                    worker=self.name, step=step, kind="tool",
+                                    tool=tc["name"], tool_ok=ok,
+                                    tokens=resp.input_tokens + resp.output_tokens,
+                                ))
+                                if action != "continue":
+                                    return self._stop(action)
+                        continue
+                    if monitor:
+                        action = monitor(StepInfo(worker=self.name, step=step, kind="llm", tokens=resp.input_tokens + resp.output_tokens))
+                        if action != "continue":
+                            return self._stop(action)
+                    answer = _strip_fences(resp.content)
+                    final = bool(answer)
+                    return answer
+                return "(no final answer within max_steps)"
+            finally:
+                # The marker is the evidence obligation the Go side checks;
+                # absence means the trace cannot establish that the agent
+                # span completed normally.
+                run_span.set_attribute(semconv.WATCHTOWER_COMPLETED, True)
+                if final:
+                    run_span.set_attribute(semconv.WATCHTOWER_FINAL, True)
+                    run_span.set_attribute(semconv.WATCHTOWER_OUTPUT, answer)
 
     def _stop(self, action: str) -> str:
         if action == "reroute":
@@ -166,24 +177,33 @@ class Worker:
             span.set_attribute(semconv.GEN_AI_INPUT_TOKENS, str(resp.input_tokens))
             span.set_attribute(semconv.GEN_AI_OUTPUT_TOKENS, str(resp.output_tokens))
             span.set_attribute(semconv.GEN_AI_RESPONSE_MODEL, resp.model)
+            if resp.tool_calls:
+                span.set_attribute(
+                    semconv.WATCHTOWER_TOOL_CALL_IDS,
+                    json.dumps([tc.get("id", "") for tc in resp.tool_calls]),
+                )
             # The contract is a promise about the final structured
             # output, so contract+output are stamped only on answer
             # turns — a tool-call turn has no output to check.
-            if self.contract and resp.content and not resp.tool_calls:
+            if resp.content and not resp.tool_calls:
                 output = _strip_fences(resp.content)
-                span.set_attribute(semconv.WATCHTOWER_CONTRACT, self.contract)
+                span.set_attribute(semconv.WATCHTOWER_FINAL, True)
                 span.set_attribute(semconv.WATCHTOWER_OUTPUT, output)
+                if self.contract:
+                    span.set_attribute(semconv.WATCHTOWER_CONTRACT, self.contract)
             return resp
 
     def _exec_tool(self, tool_call: dict[str, Any], step: int) -> tuple[bool, str]:
         name, args = tool_call["name"], tool_call.get("args", {})
 
+        call_id = tool_call.get("id", "")
         with self._tracer.start_as_current_span(
             "tool.call",
             attributes={
                 semconv.AGENT_NAME: self.name,
                 semconv.STEP_INDEX: str(step),
                 semconv.TOOL_NAME: name,
+                semconv.TOOL_CALL_ID: call_id,
                 semconv.WATCHTOWER_TOOL_ARGS: json.dumps(args),
             },
         ):

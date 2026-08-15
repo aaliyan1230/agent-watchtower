@@ -186,6 +186,41 @@ func TestReconstructTracksEvidenceGaps(t *testing.T) {
 	}
 }
 
+func TestReconstructPreservesObligationMetadata(t *testing.T) {
+	base := time.Unix(200, 0).UTC()
+	root := model.Span{
+		TraceID: "trace-obligation", SpanID: "root", Name: "agent.run",
+		StartTime: base, EndTime: base.Add(4 * time.Second), Status: model.StatusOK,
+		Attributes: map[string]string{model.WatchtowerCompleted: "true"},
+		Events: []model.Event{{Name: "supervisor.decision", Attributes: map[string]string{"action": "complete"}}},
+	}
+	llm := model.Span{
+		TraceID: "trace-obligation", SpanID: "llm", ParentID: "root", Name: "chat",
+		StartTime: base.Add(time.Second), EndTime: base.Add(2 * time.Second), Status: model.StatusOK,
+		Attributes: map[string]string{
+			model.GenAIOperationName:    "chat",
+			model.GenAISystem:           "fake",
+			model.GenAIRequestModel:     "request-model",
+			model.GenAIResponseModel:    "response-model",
+			model.WatchtowerToolCallIDs: `["call-1"]`,
+		},
+	}
+	run, err := Reconstruct([]model.Span{root, llm})
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if got := run.Steps[0].Events; len(got) != 1 || got[0].Name != "supervisor.decision" {
+		t.Fatalf("root events = %+v", got)
+	}
+	step := run.Steps[1]
+	if step.ParentID != "root" || step.ResponseModel != "response-model" {
+		t.Fatalf("llm metadata = %+v", step)
+	}
+	if len(step.ToolCallIDs) != 1 || step.ToolCallIDs[0] != "call-1" {
+		t.Fatalf("tool call ids = %+v", step.ToolCallIDs)
+	}
+}
+
 func TestReconstructSiblingOrderByTime(t *testing.T) {
 	spans := syntheticTrace()
 	// Swap the start times of s3 and s5 so the input order no longer

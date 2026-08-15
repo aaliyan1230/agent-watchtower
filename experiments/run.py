@@ -246,7 +246,11 @@ def main() -> None:
             res = run_cell(telemetry, cell, args.live)
             telemetry.shutdown()
             results.append(res)
-            print(f"[{i}/{len(cells)}] fault={cell.fault} seed={cell.seed} -> {res.verdict}")
+            print(
+                f"[{i}/{len(cells)}] fault={cell.fault} "
+                f"evidence={getattr(cell, 'evidence_fault', None)} "
+                f"seed={cell.seed} -> {res.verdict}"
+            )
         payload = {
             "protocolVersion": PROTOCOL_VERSION,
             "gridChecksum": grid_checksum,

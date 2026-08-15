@@ -12,8 +12,9 @@ import (
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
 )
 
-// Severity drives verdict mapping in the report layer: Critical maps to
-// FAIL, Warning to FLAGGED.
+// Severity is one input to verdict mapping in the report layer: critical
+// violations fail, ordinary warnings flag, and evidence-gap warnings
+// abstain as INCONCLUSIVE.
 type Severity int
 
 const (
@@ -62,11 +63,26 @@ type JudgeConfig struct {
 	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
 }
 
-// EvidenceConfig controls the structural telemetry-integrity gate.
-// Keeping it opt-in preserves the zero-config behavior of the original
-// verifier while experiment configs can require complete evidence.
+// EvidenceObligations declares the minimum trace facts needed before a
+// configured run may be treated as observed. These are evidence checks,
+// not behavior claims: a missing obligation makes the verdict abstain.
+type EvidenceObligations struct {
+	RequireRoot               bool `json:"requireRoot"`
+	RequireAgentCompletion    bool `json:"requireAgentCompletion"`
+	RequireModelCorrelation   bool `json:"requireModelCorrelation"`
+	RequireToolResults        bool `json:"requireToolResults"`
+	RequireFinalAnswer        bool `json:"requireFinalAnswer"`
+	RequireSupervisorDecision bool `json:"requireSupervisorDecision"`
+	RequireTemporalNesting    bool `json:"requireTemporalNesting"`
+}
+
+// EvidenceConfig controls the structural and property-specific
+// telemetry-integrity gate. Keeping it opt-in preserves the zero-config
+// behavior of the original verifier while experiment configs can require
+// complete evidence.
 type EvidenceConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled     bool                `json:"enabled"`
+	Obligations EvidenceObligations `json:"obligations"`
 }
 
 // Config aggregates every verifier's configuration; zero values mean
@@ -98,7 +114,7 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 	out = append(out, CheckBudget(run, cfg.Limits)...)
 	out = append(out, CheckStatus(run)...)
 	if cfg.Evidence.Enabled {
-		out = append(out, CheckEvidence(run)...)
+		out = append(out, CheckEvidence(run, cfg.Evidence.Obligations)...)
 	}
 	if cfg.Judge != nil {
 		if js, err := cfg.Judge.Run(run); err != nil {

@@ -77,7 +77,9 @@ The checks are deliberately boring and deterministic:
 - **loop**: did the agent repeat the same call (same tool, same arguments) or oscillate?
 - **budget**: steps, tokens, or duration over the limit?
 - **status**: did any span end in an error (e.g. a provider timeout)?
-- **evidence**: are parent references present and span ids unique?
+- **evidence**: are span identities, parent links, lifecycle markers,
+  model metadata, tool results, final answers, supervisor decisions, and
+  parent time windows complete enough to support a verdict?
 
 Each check emits *findings*, and a finding without evidence is not a
 finding. Findings carry the exact span ids, timestamps, and values.
@@ -195,10 +197,12 @@ make experiment-bedrock   # pilot with the DeepSeek judge on Bedrock
 make experiment-agreement # judge-vs-judge kappa matrix
 ```
 
-The evidence matrix has 120 cells: clean behavior across complete,
-dropped-parent, duplicate-span, and reordered-span telemetry. It reports
-false assurance and the rate of `INCONCLUSIVE` outcomes; reordered spans
-are a negative control because reconstruction should tolerate them.
+The evidence matrix has 270 cells: clean behavior across complete,
+dropped-parent, dropped-child, dropped-tool-result, duplicate-span,
+late-span, mismatched-tool-id, truncated-final, and reordered-span
+telemetry. It reports false assurance and the rate of `INCONCLUSIVE`
+outcomes; reordered spans are a negative control because reconstruction
+should tolerate them.
 
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over

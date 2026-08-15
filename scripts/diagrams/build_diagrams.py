@@ -190,7 +190,7 @@ def pipeline() -> None:
         ("Loop", "repeated calls"),
         ("Budget", "steps, tokens, time"),
         ("Status", "span errors"),
-        ("Evidence", "id and parent gaps"),
+        ("Evidence", "identity + obligations"),
     ]
     for i, (name, detail) in enumerate(checks):
         y = 20 + i * 105
@@ -248,10 +248,10 @@ def evidence_flow() -> None:
     supervisor = box(e, 40, 100, 270, 90, SETUP, "Supervisor meta-agent\ndecides accept, retry,\nblock, or escalate")
     workers = box(e, 390, 100, 250, 90, SOURCE, "Worker agents\nproduce results")
     behavior = box(e, 720, 35, 285, 90, FAULT, "Behavior faults\nside effects, drift,\npolicy or goal gaming")
-    telemetry = box(e, 720, 190, 285, 90, GAP, "Evidence faults\ndropped, duplicate,\nlate, or forged spans")
+    telemetry = box(e, 720, 190, 285, 90, GAP, "Evidence faults\ndropped, duplicated,\nlate, mismatched, truncated")
     trace = box(e, 1085, 100, 285, 105, WIRE, "OTLP trace\nbehavior + telemetry\narrive as evidence")
     reconstruct = box(e, 1450, 100, 310, 105, CORE, "Reconstruct run\nordered steps + evidence\nquality inventory")
-    checks = box(e, 1840, 35, 300, 90, CORE, "Deterministic checks\nproperties + evidence\nobligations")
+    checks = box(e, 1840, 35, 300, 90, CORE, "Deterministic checks\nbehavior + evidence\nobligations")
     judge = box(e, 1840, 190, 300, 90, JUDGE, "Optional LLM judge\nsemantic second opinion")
     report = box(e, 2220, 100, 300, 105, RESULT, "Evidence report\nfindings, spans,\nconfidence state")
     passed = box(e, 2600, 10, 230, 62, PASS, "PASS\nsufficient evidence")
