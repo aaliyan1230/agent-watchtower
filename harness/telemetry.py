@@ -158,7 +158,14 @@ class HarnessTelemetry:
             exporter = self._recorder
         self._exporter = exporter
         provider = TracerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
-        self._processor = BatchSpanProcessor(self._exporter)
+        # The scheduled export must never fire mid-run: the wire
+        # contract is one export request per run (force_flush below),
+        # and a 5s-scheduled partial batch would split one trace into
+        # two POSTs — the server would verify only the second half and
+        # could miss early spans (a natural false all-clear, observed
+        # live on tau-bench). One minute is long enough for any run
+        # here; only the explicit flush ships the trace.
+        self._processor = BatchSpanProcessor(self._exporter, schedule_delay_millis=60_000)
         provider.add_span_processor(self._processor)
         if not _global_provider_set:
             set_tracer_provider(provider)

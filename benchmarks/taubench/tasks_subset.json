@@ -1,0 +1,235 @@
+[
+  {
+    "user_id": "omar_anderson_3203",
+    "instruction": "Your name is Omar Anderson and your zip code is 19031. You are logical, independent, relaxing, polite. Return #W6067464 via credit_card_4190576: Electric Kettle; Wall Clock; ",
+    "actions": [
+      {
+        "name": "return_delivered_order_items",
+        "arguments": {
+          "order_id": "#W6067464",
+          "item_ids": [
+            "9624127908",
+            "8917609800"
+          ],
+          "payment_method_id": "credit_card_4190576"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "sophia_nguyen_2370",
+    "instruction": "Your name is Sophia Nguyen and your zip code is 20171. You are confident, organized. Return #W6619432 via paypal_3738584: Dumbbell Set; Yoga Mat; ",
+    "actions": [
+      {
+        "name": "return_delivered_order_items",
+        "arguments": {
+          "order_id": "#W6619432",
+          "item_ids": [
+            "3735133539",
+            "6195938807"
+          ],
+          "payment_method_id": "paypal_3738584"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "james_li_5688",
+    "instruction": "Your name is James Li and your email is james.li4495@example.com. You are rigid, confident, happy, curious, pessimistic. Return #W4435622 via gift_card_1725971: Water Bottle; ",
+    "actions": [
+      {
+        "name": "return_delivered_order_items",
+        "arguments": {
+          "order_id": "#W4435622",
+          "item_ids": [
+            "6777246137"
+          ],
+          "payment_method_id": "gift_card_1725971"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "sofia_kovacs_7075",
+    "instruction": "Your name is Sofia Kovacs and your zip code is 19049. You are patient, confident. For #W7736983, exchange Coffee Maker {'color': 'black', 'capacity': '4 cups', 'type': 'espresso', 'features': 'timer'} to {'color': 'stainless steel', 'type': 'drip', 'features': 'built-in grinder'}; via paypal_6840891. Cancel order #W5765741 because ordered by mistake. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W7736983",
+          "item_ids": [
+            "5952720925"
+          ],
+          "new_item_ids": [
+            "1323134954"
+          ],
+          "payment_method_id": "paypal_6840891"
+        }
+      },
+      {
+        "name": "cancel_pending_order",
+        "arguments": {
+          "order_id": "#W5765741",
+          "reason": "ordered by mistake"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "juan_rossi_6696",
+    "instruction": "Your name is Juan Rossi and your zip code is 77209. You are cautious, logical, organized, flexible, shy. Cancel order #W7602708 because no longer needed. ",
+    "actions": [
+      {
+        "name": "cancel_pending_order",
+        "arguments": {
+          "order_id": "#W7602708",
+          "reason": "no longer needed"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "ava_nguyen_2175",
+    "instruction": "Your name is Ava Nguyen and your email is ava.nguyen3664@example.com. You are outgoing, flexible, pessimistic, cautious, messy. For #W1504875, exchange Notebook {'size': 'A6', 'cover type': 'soft cover'} to {'size': 'A5'}; via paypal_6262583. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W1504875",
+          "item_ids": [
+            "9421195098"
+          ],
+          "new_item_ids": [
+            "9799386954"
+          ],
+          "payment_method_id": "paypal_6262583"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "mei_martin_4260",
+    "instruction": "Your name is Mei Martin and your zip code is 32124. You are messy, creative, outgoing, rigid, cautious. For #W5564375, exchange LED Light Bulb {'brightness': '60W equivalent', 'color temperature': 'daylight', 'connectivity': 'none'} to {'brightness': '75W equivalent', 'connectivity': 'Wi-Fi'}; Office Chair {'material': 'fabric', 'color': 'black', 'armrest': 'none', 'backrest height': 'high-back'} to {}; via paypal_2299608. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W5564375",
+          "item_ids": [
+            "5570660360",
+            "1793929609"
+          ],
+          "new_item_ids": [
+            "7445824652",
+            "1793929609"
+          ],
+          "payment_method_id": "paypal_2299608"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "yara_ito_8499",
+    "instruction": "Your name is Yara Ito and your email is yara.ito7353@example.com. You are cautious, flexible, patient, happy. For #W8353027, exchange Grill {'type': 'electric', 'size': 'medium', 'features': 'rotisserie'} to {'type': 'charcoal', 'features': 'side burner'}; via paypal_1679017. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W8353027",
+          "item_ids": [
+            "7717598293"
+          ],
+          "new_item_ids": [
+            "7848293342"
+          ],
+          "payment_method_id": "paypal_1679017"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "emma_kovacs_5477",
+    "instruction": "Your name is Emma Kovacs and your email is emma.kovacs5723@example.com. You are direct, sad. Cancel order #W7109609 because ordered by mistake. Cancel order #W6554908 because ordered by mistake. ",
+    "actions": [
+      {
+        "name": "cancel_pending_order",
+        "arguments": {
+          "order_id": "#W7109609",
+          "reason": "ordered by mistake"
+        }
+      },
+      {
+        "name": "cancel_pending_order",
+        "arguments": {
+          "order_id": "#W6554908",
+          "reason": "ordered by mistake"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "daiki_hernandez_1356",
+    "instruction": "Your name is Daiki Hernandez and your zip code is 91203. You are sad, outgoing, messy, polite. For #W1166549, exchange Electric Kettle {'capacity': '1L', 'material': 'glass', 'color': 'white'} to {'material': 'stainless steel', 'color': 'black'}; via credit_card_1289579. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W1166549",
+          "item_ids": [
+            "5268233322"
+          ],
+          "new_item_ids": [
+            "7602931732"
+          ],
+          "payment_method_id": "credit_card_1289579"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "yusuf_gonzalez_8900",
+    "instruction": "Your name is Yusuf Gonzalez and your zip code is 91455. You are logical, busy, outgoing, independent, pessimistic. For #W1679211, exchange Jigsaw Puzzle {'pieces': '2000', 'theme': 'fantasy', 'difficulty level': 'beginner'} to {'pieces': '500', 'theme': 'art', 'difficulty level': 'intermediate'}; T-Shirt {'color': 'blue', 'size': 'M', 'material': 'cotton', 'style': 'crew neck'} to {'color': 'red', 'size': 'L', 'style': 'v-neck'}; via paypal_3022415. ",
+    "actions": [
+      {
+        "name": "exchange_delivered_order_items",
+        "arguments": {
+          "order_id": "#W1679211",
+          "item_ids": [
+            "7127170374",
+            "9612497925"
+          ],
+          "new_item_ids": [
+            "4068787148",
+            "3234800602"
+          ],
+          "payment_method_id": "paypal_3022415"
+        }
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "user_id": "olivia_silva_7273",
+    "instruction": "Your name is Olivia Silva and your zip code is 32240. You are creative, optimistic. Cancel order #W7613749 because ordered by mistake. ",
+    "actions": [
+      {
+        "name": "cancel_pending_order",
+        "arguments": {
+          "order_id": "#W7613749",
+          "reason": "ordered by mistake"
+        }
+      }
+    ],
+    "outputs": []
+  }
+]

@@ -35,7 +35,9 @@ func runTrace(endpoint string, variant string) (map[string]any, error) {
 		return nil, fmt.Errorf("exporter: %w", err)
 	}
 	provider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		// One export request = one run: the scheduled batch export must
+		// never split the trace mid-run; only ForceFlush ships it.
+		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(60*time.Second)),
 	)
 	tracer := provider.Tracer("watchtower.goproducer")
 
