@@ -26,6 +26,18 @@ func TestVerdictFor(t *testing.T) {
 			{Verifier: "loop", Severity: verify.SeverityWarning},
 			{Verifier: "policy", Severity: verify.SeverityCritical},
 		}, want: VerdictFail},
+		{name: "judge critical alone fails", findings: []verify.Finding{
+			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
+		}, want: VerdictFail},
+		{name: "judge critical never overrides evidence gap", findings: []verify.Finding{
+			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning},
+			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
+		}, want: VerdictInconclusive},
+		{name: "deterministic critical still beats evidence gap", findings: []verify.Finding{
+			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning},
+			{Verifier: "policy", Severity: verify.SeverityCritical},
+			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
+		}, want: VerdictFail},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

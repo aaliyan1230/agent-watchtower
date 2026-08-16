@@ -214,6 +214,29 @@ def clean_false_positive_rate(results: Sequence[Mapping]) -> float:
     return sum(r.get("verdict") != "PASS" for r in runs) / len(runs)
 
 
+def evidence_gap_preservation(results: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Fraction of evidence-gap cells without a deterministic critical
+    violation whose verdict stayed INCONCLUSIVE. Must be 1.0 by
+    construction: the judge reads the same trace, so it may never flip
+    an abstention into a FAIL or PASS. Cells where a deterministic
+    verifier already observed a violation correctly FAIL and are not
+    part of this denominator. None when no gap cell qualifies."""
+    gap_cells = [
+        r
+        for r in results
+        if any(f.get("kind") == "evidence_gap" for f in r.get("findings", []))
+        and not any(
+            f.get("severity") == 1 and f.get("verifier") != "judge"
+            for f in r.get("findings", [])
+            if f.get("kind") != "evidence_gap"
+        )
+    ]
+    if not gap_cells:
+        return None, 0
+    preserved = sum(r.get("verdict") == "INCONCLUSIVE" for r in gap_cells)
+    return preserved / len(gap_cells), len(gap_cells)
+
+
 def behavior_by_telemetry_matrix(results: Sequence[Mapping]) -> dict:
     """Per (behavior fault, telemetry fault) pair, the fraction of runs
     returning PASS — read as: could the telemetry fault hide the
@@ -515,6 +538,14 @@ def render_false_assurance(results: Sequence[Mapping], name: str = "") -> str:
     for behavior, row in matrix.items():
         line = f"{behavior:<18}" + "".join(f"{_pct(row.get(c, 0.0)):>20}" for c in cols)
         lines.append(line)
+    if any(r.get("judged") for r in cells):
+        kappa, n_judged = judge_vs_deterministic(cells)
+        preserved, n_gaps = evidence_gap_preservation(cells)
+        lines.append("")
+        if kappa is not None:
+            lines.append(f"judge vs deterministic kappa (n={n_judged} judged runs): {kappa:.2f}")
+        if preserved is not None:
+            lines.append(f"evidence gaps preserved under judge: {_pct(preserved)} ({n_gaps} gap cells)")
     return "\n".join(lines)
 
 

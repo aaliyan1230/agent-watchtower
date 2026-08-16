@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.9"
+const ProtocolVersion = "0.10"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -83,27 +83,35 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 
 // verdictFor maps findings to a verdict. A direct critical violation
 // fails first; an evidence gap is INCONCLUSIVE rather than a failure;
-// ordinary warnings retain the legacy FLAGGED outcome.
+// ordinary warnings retain the legacy FLAGGED outcome. A judge
+// critical finding fails only when no evidence gap exists: the judge
+// reads the same trace, so when the channel cannot support a claim the
+// verdict abstains regardless of the judge's opinion.
 func verdictFor(findings []verify.Finding) Verdict {
-	critical, warning := false, false
-	evidenceGap := false
+	detCritical, judgeCritical := false, false
+	warning, evidenceGap := false, false
 	for _, f := range findings {
 		if f.Kind == verify.FindingEvidenceGap {
 			evidenceGap = true
 			continue
 		}
-		switch f.Severity {
-		case verify.SeverityCritical:
-			critical = true
-		case verify.SeverityWarning:
-			warning = true
+		if f.Severity == verify.SeverityCritical {
+			if f.Verifier == "judge" || f.Source != "" {
+				judgeCritical = true
+			} else {
+				detCritical = true
+			}
+			continue
 		}
+		warning = true
 	}
 	switch {
-	case critical:
+	case detCritical:
 		return VerdictFail
 	case evidenceGap:
 		return VerdictInconclusive
+	case judgeCritical:
+		return VerdictFail
 	case warning:
 		return VerdictFlagged
 	default:

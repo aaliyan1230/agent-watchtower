@@ -1,4 +1,4 @@
-.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-live experiment-bedrock experiment-agreement diagrams
+.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-live experiment-bedrock experiment-agreement diagrams
 
 test: ## go test -race (core + producer) + pytest
 	cd watchtower && go test ./... -race
@@ -45,6 +45,10 @@ experiment-false-assurance: ## 2x2 behavior x telemetry grid, contract vs behavi
 	.venv/bin/python -m experiments.run --false-assurance --no-traces --out artifacts/results-fa.json
 	.venv/bin/python -m experiments.run --false-assurance --no-traces --config experiment_behavior_only_config.json --out artifacts/results-fa-baseline.json
 	.venv/bin/python -m experiments.analyze --false-assurance --results artifacts/results-fa.json --baseline artifacts/results-fa-baseline.json
+
+experiment-fa-live: ## live judge pilot over the four conditions (needs GEMINI_API_KEY in .env)
+	.venv/bin/python -m experiments.run --live --false-assurance --pilot --out artifacts/results-fa-live.json
+	.venv/bin/python -m experiments.analyze --false-assurance --results artifacts/results-fa-live.json
 
 experiment-live: ## small live stratified sample (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --out artifacts/results-live.json

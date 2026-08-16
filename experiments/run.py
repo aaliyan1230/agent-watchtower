@@ -30,7 +30,7 @@ from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
-from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, build_false_assurance_grid, checksum
+from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, build_false_assurance_grid, build_false_assurance_pilot, checksum
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
@@ -221,8 +221,12 @@ def main() -> None:
         raise SystemExit("--live --judge gemini needs GEMINI_API_KEY in .env")
 
     if args.false_assurance:
-        cells = build_false_assurance_grid()
-        grid_checksum = checksum(cells)
+        if args.pilot:
+            cells = build_false_assurance_pilot()
+            grid_checksum = "false_assurance_pilot"
+        else:
+            cells = build_false_assurance_grid()
+            grid_checksum = checksum(cells)
     elif args.evidence:
         cells = build_evidence_grid()
         grid_checksum = checksum(cells)

@@ -114,6 +114,30 @@ def build_false_assurance_grid(
     return cells
 
 
+def build_false_assurance_pilot(
+    seeds: list[int] = [1, 2],
+) -> list[ExperimentCell]:
+    """A small live pilot over the four conditions: representative
+    behavior faults x representative telemetry faults x paired seeds.
+    Sized for real model calls with the judge enabled."""
+    behaviors = [None, "policy_violation", "schema_violation"]
+    telemetries = [None, "drop_tool_result", "truncate_final"]
+    cells: list[ExperimentCell] = []
+    for behavior in behaviors:
+        for telemetry in telemetries:
+            for seed in seeds:
+                cells.append(
+                    ExperimentCell(
+                        fault=behavior,
+                        seed=seed,
+                        model="flash",
+                        run=1,
+                        evidence_fault=telemetry,
+                    )
+                )
+    return cells
+
+
 def checksum(cells: list[ExperimentCell]) -> str:
     """Grid identity: same cells, same sha256. Artifacts produced from
     a grid are labelled with this so results can be attributed."""

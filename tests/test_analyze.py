@@ -8,6 +8,7 @@ from experiments.analyze import (
     condition_of,
     condition_summary,
     detection_rate,
+    evidence_gap_preservation,
     false_assurance_rate_2x2,
     false_positive_rate,
     judge_consensus,
@@ -72,6 +73,43 @@ def test_condition_comparison_render():
     assert "0% / 100%" in out
     assert "100% / 0%" in out
     assert "false assurance: contract 0%   baseline 100%" in out
+
+
+def test_evidence_gap_preservation_under_judge():
+    cells = [
+        {
+            "fault": None,
+            "evidence_fault": "drop_tool_result",
+            "verdict": "INCONCLUSIVE",
+            "judged": True,
+            "findings": [
+                {"verifier": "evidence", "kind": "evidence_gap", "severity": 0},
+                {"verifier": "judge", "severity": 1},
+            ],
+        },
+        {
+            # deterministic critical + gap: FAIL is correct, not an override
+            "fault": "policy_violation",
+            "evidence_fault": "truncate_final",
+            "verdict": "FAIL",
+            "judged": True,
+            "findings": [
+                {"verifier": "policy", "severity": 1},
+                {"verifier": "evidence", "kind": "evidence_gap", "severity": 0},
+            ],
+        },
+        {
+            "fault": "policy_violation",
+            "evidence_fault": None,
+            "verdict": "FAIL",
+            "judged": True,
+            "findings": [{"verifier": "policy", "severity": 1}],
+        },
+    ]
+    preserved, n = evidence_gap_preservation(cells)
+    assert n == 1  # only the judge-free-gap cell qualifies
+    assert preserved == pytest.approx(1.0)
+    assert evidence_gap_preservation(cells[1:]) == (None, 0)
 
 
 def test_detection_rate():
