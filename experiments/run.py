@@ -112,6 +112,9 @@ class CellResult:
     budget: dict = field(default_factory=dict)
     answer: str = ""
     trace_id: str = ""
+    trace_path: str = ""
+    trace_sha256: str = ""
+    report_sha256: str = ""
     protocol: str = ""  # report protocolVersion, for artifact freezing
     judge_usage: dict = field(default_factory=dict)  # measured judge tokens
     judge_model: str = ""  # judging model, for cost attribution on clean runs
@@ -148,8 +151,15 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
         run=cell.run,
         evidence_fault=getattr(cell, "evidence_fault", None),
     )
+    native_outcome = "known_behavior_fault" if cell.fault else "clean_reference"
+    trace_record = telemetry.finalize_trace(report, native_outcome=native_outcome)
+    trace_fields = {
+        "trace_path": (trace_record or {}).get("tracePath", ""),
+        "trace_sha256": (trace_record or {}).get("traceSha256", ""),
+        "report_sha256": (trace_record or {}).get("reportSha256", ""),
+    }
     if report is None:
-        return CellResult(verdict="NO_REPORT", **base)
+        return CellResult(verdict="NO_REPORT", **trace_fields, **base)
     return CellResult(
         verdict=report["verdict"],
         judged=report["judged"],
@@ -160,6 +170,7 @@ def run_cell(telemetry: HarnessTelemetry, cell, live: bool) -> CellResult:
         protocol=report.get("protocolVersion", ""),
         judge_usage=report.get("judgeUsage", {}),
         judge_model=report.get("judgeModel", ""),
+        **trace_fields,
         **base,
     )
 
@@ -199,6 +210,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
     parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
     parser.add_argument("--evidence", action="store_true", help="run the clean-behavior telemetry-fault grid")
+    parser.add_argument("--trace-dir", type=Path, default=Path("artifacts/traces"), help="directory for clean trace artifacts")
+    parser.add_argument("--no-traces", action="store_true", help="disable durable trace recording")
     parser.add_argument("--judge", choices=["gemini", "bedrock", "kimi"], default="gemini", help="judge backend for live mode")
     args = parser.parse_args()
 
@@ -229,6 +242,7 @@ def main() -> None:
         ("live", "kimi"): "experiment_live_kimi_config.json",
     }[("live" if args.live else "offline", args.judge)]
     config = str(REPO_ROOT / "watchtower" / "testdata" / config_name)
+    config_checksum = file_checksum(config)
     env: dict[str, str] | None = None
     if args.live:
         env = {"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY") or ""}
@@ -238,10 +252,27 @@ def main() -> None:
     try:
         results: list[CellResult] = []
         for i, cell in enumerate(cells, 1):
+            trace_metadata = {
+                "benchmark": "watchtower-controlled-triage",
+                "taskId": "triage-ticket-42",
+                "producer": "watchtower-harness",
+                "framework": "python-otel-harness",
+                "model": LIVE_MODEL if args.live else cell.model,
+                "seed": cell.seed,
+                "run": cell.run,
+                "suiteProtocolVersion": PROTOCOL_VERSION,
+                "configSha256": config_checksum,
+                "behaviorFault": cell.fault,
+                "evidenceFault": getattr(cell, "evidence_fault", None),
+                "license": "project-generated controlled workload",
+                "privacy": "no production data; synthetic ticket and tool result",
+            }
             telemetry = HarnessTelemetry(
                 ENDPOINT,
                 service_name="experiment",
                 evidence_fault=getattr(cell, "evidence_fault", None),
+                trace_dir=None if args.no_traces else str(args.trace_dir),
+                trace_metadata=trace_metadata,
             )
             res = run_cell(telemetry, cell, args.live)
             telemetry.shutdown()
@@ -254,12 +285,13 @@ def main() -> None:
         payload = {
             "protocolVersion": PROTOCOL_VERSION,
             "gridChecksum": grid_checksum,
-            "configChecksum": file_checksum(config),
+            "configChecksum": config_checksum,
             "cellsSignature": cells_signature(cells),
             "reportProtocolVersion": results[0].protocol,
             "mode": "live" if args.live else "offline",
             "gridKind": "evidence" if args.evidence else "behavior",
             "judgeBackend": args.judge,
+            "traceDir": None if args.no_traces else str(args.trace_dir),
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cells": [asdict(r) for r in results],
         }

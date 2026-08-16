@@ -276,11 +276,46 @@ def evidence_flow() -> None:
     save("evidence_flow", e)
 
 
+def research_data_flow() -> None:
+    """Research data path: benchmark truth plus telemetry mutations.
+
+    This is deliberately separate from the runtime architecture diagram. It
+    makes the paper's data provenance visible: clean traces are archived
+    before transport faults are applied, and benchmark outcomes remain a
+    separate oracle from the Watchtower verdict.
+    """
+    e: list[dict] = []
+    tasks = box(e, 40, 70, 300, 90, SETUP, "Public benchmark tasks\nnative state and scorer")
+    producer = box(e, 420, 70, 300, 90, SOURCE, "Instrumented producer\nPython, go-rig, or adapter")
+    clean = box(e, 800, 70, 300, 90, WIRE, "Clean OTel trace\nmodel, tool, agent spans")
+    recorder = box(e, 1180, 10, 320, 90, RESULT, "Recorder + manifest\nraw trace, IDs, seed, outcome")
+    mutator = box(e, 1180, 145, 320, 90, GAP, "Seeded telemetry mutator\ndrop, delay, duplicate, mismatch")
+    watchtower = box(e, 1580, 70, 330, 105, CORE, "Watchtower\nreconstruct + evidence contract")
+    oracle = box(e, 1580, 220, 330, 80, SETUP, "Benchmark oracle\nstate/effect outcome")
+    report = box(e, 1990, 70, 320, 105, RESULT, "Three-way report\nPASS / FAIL / INCONCLUSIVE")
+    archive = box(e, 2390, 40, 330, 105, RESULT, "Replayable artifact\nclean trace + manifest\nchecksums and provenance")
+    replay = box(e, 2390, 205, 330, 90, WIRE, "Replay command\nload clean trace, apply\nseeded mutation, verify")
+
+    arrow(e, 340, 115, 420, 115, "task")
+    arrow(e, 720, 115, 800, 115, "run")
+    arrow(e, 1100, 115, 1180, 55, "archive first")
+    arrow(e, 1100, 115, 1180, 190, "mutate copy")
+    arrow(e, 1500, 55, 1580, 120, "clean or faulted")
+    arrow(e, 1500, 190, 1580, 145, "clean or faulted")
+    arrow(e, 1745, 175, 1745, 220, "join")
+    arrow(e, 1910, 120, 1990, 120)
+    arrow(e, 2310, 120, 2390, 92, "publish")
+    arrow(e, 2555, 145, 2555, 205, "replay")
+    arrow(e, 2390, 250, 1910, 160, "send JSON")
+    save("research_data_flow", e)
+
+
 def main() -> None:
     architecture()
     pipeline()
     experiment()
     evidence_flow()
+    research_data_flow()
     print(f"wrote {len(list(OUT.glob('*.excalidraw')))} diagrams -> {OUT}")
 
 

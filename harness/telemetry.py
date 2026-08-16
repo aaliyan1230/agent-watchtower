@@ -23,6 +23,8 @@ from opentelemetry.sdk.trace import Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
 from opentelemetry.trace import set_tracer_provider
 
+from .trace_artifacts import TraceRecorder
+
 # The SDK allows one global provider per process; experiments create a
 # telemetry per cell, so only the first sets it.
 _global_provider_set = False
@@ -117,7 +119,14 @@ class HarnessTelemetry:
     accumulates spans until flush() — one export per run, which is what
     the Go graph reconstructor expects (one trace per request)."""
 
-    def __init__(self, endpoint: str, service_name: str = "harness", evidence_fault: str | None = None):
+    def __init__(
+        self,
+        endpoint: str,
+        service_name: str = "harness",
+        evidence_fault: str | None = None,
+        trace_dir: str | None = None,
+        trace_metadata: dict[str, Any] | None = None,
+    ):
         global _global_provider_set
         self._endpoint = endpoint.rstrip("/")
         # An explicit `endpoint` is used verbatim as the export URL (the
@@ -126,6 +135,12 @@ class HarnessTelemetry:
         exporter: SpanExporter = OTLPSpanExporter(endpoint=self._endpoint + "/v1/traces")
         if evidence_fault:
             exporter = EvidenceFaultExporter(exporter, evidence_fault)
+        self._recorder: TraceRecorder | None = None
+        if trace_dir:
+            # This wrapper sits outside EvidenceFaultExporter, so it sees a
+            # clean batch while the inner exporter sends the mutated copy.
+            self._recorder = TraceRecorder(exporter, trace_dir, trace_metadata)
+            exporter = self._recorder
         self._exporter = exporter
         provider = TracerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
         self._processor = BatchSpanProcessor(self._exporter)
@@ -142,6 +157,17 @@ class HarnessTelemetry:
         """Synchronously export all pending spans; returns whether the
         ingest accepted them."""
         return self._processor.force_flush()
+
+    def finalize_trace(
+        self,
+        report: dict[str, Any] | None,
+        *,
+        native_outcome: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Attach the report to the durable trace manifest when enabled."""
+        if self._recorder is None:
+            return None
+        return self._recorder.finalize(report, native_outcome=native_outcome)
 
     def fetch_report(self, trace_id: str, retries: int = 5, delay: float = 0.1) -> dict[str, Any] | None:
         """Fetch the verdict for a trace from the report store. The
