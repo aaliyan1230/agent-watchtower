@@ -1,0 +1,16 @@
+{
+  "contracts": [
+    {
+      "name": "ticket",
+      "fields": {
+        "id": { "required": true, "type": "int" },
+        "title": { "required": true, "type": "string" },
+        "labels": { "required": false, "type": "array" }
+      }
+    }
+  ],
+  "policy": { "allowedTools": ["search"] },
+  "loop": { "enabled": true },
+  "limits": { "maxSteps": 8, "maxTotalTokens": 300, "maxDurationMs": 60000 },
+  "evidence": { "enabled": false }
+}

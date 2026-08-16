@@ -69,6 +69,10 @@ class EvidenceFaultExporter(SpanExporter):
             batch = self._truncate_final_markers(batch)
         elif self._fault == "late_span":
             batch = self._move_first_child_late(batch)
+        elif self._fault == "drop_attribute":
+            batch = self._drop_required_attribute(batch)
+        elif self._fault == "sample_spans":
+            batch = [span for i, span in enumerate(batch) if i % 2 == 0]
         return self._inner.export(batch)
 
     @staticmethod
@@ -104,6 +108,17 @@ class EvidenceFaultExporter(SpanExporter):
             duration = max(1_000_000, span.end_time - span.start_time)
             start = latest_end + 1_000_000
             batch[i] = _clone_span(span, start_time=start, end_time=start + duration)
+            break
+        return batch
+
+    @staticmethod
+    def _drop_required_attribute(batch):
+        for i, span in enumerate(batch):
+            if span.name != "chat":
+                continue
+            attrs = dict(span.attributes)
+            attrs.pop("gen_ai.system", None)
+            batch[i] = _clone_span(span, attributes=attrs)
             break
         return batch
 

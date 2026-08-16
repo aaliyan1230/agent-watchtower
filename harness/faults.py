@@ -54,6 +54,8 @@ class EvidenceFaultKind(Enum):
     MISMATCH_TOOL_ID = "mismatch_tool_id"  # replace a result id with an unpaired id
     TRUNCATE_FINAL = "truncate_final"  # remove the final-answer evidence markers
     LATE_SPAN = "late_span"  # move a child outside its parent's time window
+    DROP_ATTRIBUTE = "drop_attribute"  # remove a required correlation attribute (gen_ai.system)
+    SAMPLE_SPANS = "sample_spans"  # deterministic sampling: drop every other span
 
 
 @dataclass

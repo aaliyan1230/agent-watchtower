@@ -19,7 +19,7 @@ from harness.faults import EvidenceFaultKind, FaultKind
 # Frozen-protocol marker: bump when the experiment definition changes
 # (fault steps, scripts, configs) so old artifacts are never compared
 # silently against new ones.
-PROTOCOL_VERSION = "3"
+PROTOCOL_VERSION = "4"
 
 MODEL_VARIANTS = ["flash", "pro"]  # cheap tier for bulk, pro tier for a stratified sample
 SEEDS = [1, 2, 3, 4, 5]  # sized from pilot results in Phase 2
@@ -82,6 +82,38 @@ def build_evidence_grid(
     return cells
 
 
+def build_false_assurance_grid(
+    seeds: list[int] = SEEDS,
+    models: list[str] = ["flash"],
+) -> list[ExperimentCell]:
+    """Cross behavior faults with telemetry faults: the 2x2 design.
+
+    Four paired conditions fall out of the product: clean/faulty
+    behavior x clean/faulty telemetry. The dangerous cell is faulty
+    behavior + faulty telemetry — a hidden violation that a naive
+    monitor would miss entirely. Only one model variant and one run
+    per cell: with the deterministic FakeProvider the seed is the
+    statistical unit, and behavior does not vary across variants.
+    """
+    behaviors = [None, *(f.value for f in FaultKind)]
+    telemetries = [None, *(f.value for f in EvidenceFaultKind)]
+    cells: list[ExperimentCell] = []
+    for behavior in behaviors:
+        for telemetry in telemetries:
+            for seed in seeds:
+                for model in models:
+                    cells.append(
+                        ExperimentCell(
+                            fault=behavior,
+                            seed=seed,
+                            model=model,
+                            run=1,
+                            evidence_fault=telemetry,
+                        )
+                    )
+    return cells
+
+
 def checksum(cells: list[ExperimentCell]) -> str:
     """Grid identity: same cells, same sha256. Artifacts produced from
     a grid are labelled with this so results can be attributed."""
@@ -94,13 +126,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="build the experiment grid")
     parser.add_argument("--out", type=Path, default=Path("artifacts"))
     parser.add_argument("--evidence", action="store_true", help="build the clean-behavior telemetry-fault grid")
+    parser.add_argument("--false-assurance", action="store_true", help="build the behavior x telemetry 2x2 grid")
     args = parser.parse_args()
 
-    cells = build_evidence_grid() if args.evidence else build_grid()
+    if args.false_assurance:
+        cells = build_false_assurance_grid()
+    elif args.evidence:
+        cells = build_evidence_grid()
+    else:
+        cells = build_grid()
     args.out.mkdir(parents=True, exist_ok=True)
     manifest = {
         "protocolVersion": PROTOCOL_VERSION,
-        "gridKind": "evidence" if args.evidence else "behavior",
+        "gridKind": "false_assurance" if args.false_assurance else "evidence" if args.evidence else "behavior",
         "checksum": checksum(cells),
         "cells": [asdict(c) for c in cells],
     }

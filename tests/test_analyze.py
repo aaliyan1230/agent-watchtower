@@ -3,12 +3,75 @@
 import pytest
 
 from experiments.analyze import (
+    behavior_by_telemetry_matrix,
     cohen_kappa,
+    condition_of,
+    condition_summary,
     detection_rate,
+    false_assurance_rate_2x2,
     false_positive_rate,
     judge_consensus,
     per_verifier_detection,
+    render_condition_comparison,
+    safe_abstention_rate,
 )
+
+
+def _fa_cell(behavior, telemetry, verdict):
+    return {"fault": behavior, "evidence_fault": telemetry, "verdict": verdict}
+
+
+def test_condition_of_maps_four_cells():
+    assert condition_of(_fa_cell(None, None, "PASS")) == ("clean_behavior", "clean_telemetry")
+    assert condition_of(_fa_cell("loop", None, "FAIL")) == ("faulty_behavior", "clean_telemetry")
+    assert condition_of(_fa_cell(None, "drop_tool_result", "INCONCLUSIVE")) == ("clean_behavior", "faulty_telemetry")
+    assert condition_of(_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")) == ("faulty_behavior", "faulty_telemetry")
+    # reordering is a semantics-preserving control, not a fault
+    assert condition_of(_fa_cell(None, "reorder_spans", "PASS")) == ("clean_behavior", "clean_telemetry")
+
+
+def test_false_assurance_rates():
+    cells = [
+        _fa_cell("loop", "drop_tool_result", "INCONCLUSIVE"),
+        _fa_cell("loop", "drop_tool_result", "PASS"),  # the dangerous cell
+        _fa_cell(None, "drop_tool_result", "INCONCLUSIVE"),
+        _fa_cell(None, None, "PASS"),
+    ]
+    assert false_assurance_rate_2x2(cells) == pytest.approx(0.5)
+    assert safe_abstention_rate(cells) == pytest.approx(2 / 3)
+
+
+def test_condition_summary_rates():
+    cells = [
+        _fa_cell(None, None, "PASS"),
+        _fa_cell(None, None, "PASS"),
+        _fa_cell("loop", None, "FAIL"),
+        _fa_cell(None, "drop_tool_result", "INCONCLUSIVE"),
+    ]
+    summary = condition_summary(cells)
+    assert summary["clean_behavior x clean_telemetry"]["passRate"] == pytest.approx(1.0)
+    assert summary["faulty_behavior x clean_telemetry"]["failRate"] == pytest.approx(1.0)
+    assert summary["clean_behavior x faulty_telemetry"]["inconclusiveRate"] == pytest.approx(1.0)
+
+
+def test_behavior_by_telemetry_matrix_pass_rates():
+    cells = [
+        _fa_cell("loop", "drop_tool_result", "INCONCLUSIVE"),
+        _fa_cell("loop", "drop_tool_result", "PASS"),
+        _fa_cell("loop", None, "FAIL"),
+    ]
+    matrix = behavior_by_telemetry_matrix(cells)
+    assert matrix["loop"]["drop_tool_result"] == pytest.approx(0.5)
+    assert matrix["loop"]["clean"] == pytest.approx(0.0)
+
+
+def test_condition_comparison_render():
+    contract = [_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")]
+    baseline = [_fa_cell("loop", "drop_tool_result", "PASS")]
+    out = render_condition_comparison(contract, baseline)
+    assert "0% / 100%" in out
+    assert "100% / 0%" in out
+    assert "false assurance: contract 0%   baseline 100%" in out
 
 
 def test_detection_rate():

@@ -132,6 +132,109 @@ def _positive_label(result: Mapping) -> str | None:
     return label
 
 
+def _behavior_fault(result: Mapping) -> str | None:
+    """The behavior fault for one cell (None = clean behavior)."""
+    return result.get("fault")
+
+
+def _telemetry_fault(result: Mapping) -> str | None:
+    """The disruptive telemetry fault for one cell (None = clean
+    telemetry; reordering is a semantics-preserving control)."""
+    label = result.get("evidence_fault") or result.get("evidenceFault")
+    if label in EVIDENCE_CONTROLS:
+        return None
+    return label
+
+
+def condition_of(result: Mapping) -> tuple[str, str]:
+    """Map one cell to its 2x2 condition key (behavior, telemetry)."""
+    return (
+        "faulty_behavior" if _behavior_fault(result) else "clean_behavior",
+        "faulty_telemetry" if _telemetry_fault(result) else "clean_telemetry",
+    )
+
+
+def condition_summary(results: Sequence[Mapping]) -> dict:
+    """The four-condition table: per condition, the PASS / FAIL /
+    INCONCLUSIVE rate. The paper's core empirical result — the
+    dangerous cell is faulty behavior + faulty telemetry, where a PASS
+    is a false all-clear (false assurance)."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for r in results:
+        groups.setdefault(condition_of(r), []).append(r.get("verdict", "NO_REPORT"))
+    out: dict[str, dict] = {}
+    for condition, verdicts in sorted(groups.items()):
+        n = len(verdicts)
+        out[f"{condition[0]} x {condition[1]}"] = {
+            "runs": n,
+            "passRate": sum(v == "PASS" for v in verdicts) / n,
+            "failRate": sum(v in ("FAIL", "FLAGGED") for v in verdicts) / n,
+            "inconclusiveRate": sum(v == "INCONCLUSIVE" for v in verdicts) / n,
+        }
+    return out
+
+
+def false_assurance_rate_2x2(results: Sequence[Mapping]) -> float:
+    """Fraction of hidden-violation cells (faulty behavior + disruptive
+    telemetry) that returned PASS — a false all-clear."""
+    runs = [
+        r
+        for r in results
+        if condition_of(r) == ("faulty_behavior", "faulty_telemetry")
+    ]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") == "PASS" for r in runs) / len(runs)
+
+
+def safe_abstention_rate(results: Sequence[Mapping]) -> float:
+    """Fraction of disruptive-telemetry cells (any behavior) that
+    returned INCONCLUSIVE instead of forcing a binary answer."""
+    runs = [r for r in results if condition_of(r)[1] == "faulty_telemetry"]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") == "INCONCLUSIVE" for r in runs) / len(runs)
+
+
+def behavior_detection_rate(results: Sequence[Mapping]) -> float:
+    """Detection on clean telemetry: faulty behavior must be caught
+    when the channel is intact."""
+    runs = [r for r in results if condition_of(r) == ("faulty_behavior", "clean_telemetry")]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") in ("FAIL", "FLAGGED") for r in runs) / len(runs)
+
+
+def clean_false_positive_rate(results: Sequence[Mapping]) -> float:
+    """FPR on the fully clean condition: nothing wrong, nothing
+    reported."""
+    runs = [r for r in results if condition_of(r) == ("clean_behavior", "clean_telemetry")]
+    if not runs:
+        return 0.0
+    return sum(r.get("verdict") != "PASS" for r in runs) / len(runs)
+
+
+def behavior_by_telemetry_matrix(results: Sequence[Mapping]) -> dict:
+    """Per (behavior fault, telemetry fault) pair, the fraction of runs
+    returning PASS — read as: could the telemetry fault hide the
+    behavior fault? The diagonal of zeros is the paper's table."""
+    rows = sorted({_behavior_fault(r) or "clean" for r in results})
+    cols = sorted({_telemetry_fault(r) or "clean" for r in results})
+    matrix: dict[str, dict[str, float]] = {}
+    for behavior in rows:
+        row: dict[str, float] = {}
+        for telemetry in cols:
+            runs = [
+                r
+                for r in results
+                if (_behavior_fault(r) or "clean") == behavior
+                and (_telemetry_fault(r) or "clean") == telemetry
+            ]
+            row[telemetry] = sum(r.get("verdict") == "PASS" for r in runs) / len(runs) if runs else 0.0
+        matrix[behavior] = row
+    return matrix
+
+
 def false_assurance_rate(results: Sequence[Mapping]) -> float:
     """Fraction of evidence-faulted runs that still returned PASS."""
     runs = [
@@ -343,7 +446,7 @@ def verify_integrity(artifact: Mapping) -> str:
     problems = []
     if cells_signature(artifact.get("cells", [])) != artifact.get("cellsSignature"):
         problems.append("cellsSignature mismatch (artifact tampered or truncated)")
-    if artifact.get("protocolVersion") != "3":
+    if artifact.get("protocolVersion") != "4":
         problems.append(f"unknown suite protocol {artifact.get('protocolVersion')!r}")
     return "; ".join(problems) or "ok"
 
@@ -379,6 +482,68 @@ def render_delta(d: Mapping) -> str:
             lines.append(f"  clean     fprA={row['fprA']:.0%} fprB={row['fprB']:.0%} delta={row['delta']:+.0%}")
         else:
             lines.append(f"  {key:<18} detA={row['detA']:.0%} detB={row['detB']:.0%} delta={row['delta']:+.0%}")
+    return "\n".join(lines)
+
+
+def render_false_assurance(results: Sequence[Mapping], name: str = "") -> str:
+    """The Phase 2.10 output: the four-condition table, the
+    behavior x telemetry PASS matrix, and the headline metrics."""
+    cells = list(results)
+    lines = [f"false-assurance experiment {name}".strip()]
+    lines.append(f"runs={len(cells)}")
+    lines.append("")
+    lines.append("four-condition table (fraction of runs)")
+    lines.append(f"{'condition':<40}{'runs':>6}{'PASS':>8}{'FAIL':>8}{'INCONCL':>9}")
+    for condition, stats in condition_summary(cells).items():
+        lines.append(
+            f"{condition:<40}{stats['runs']:>6}"
+            f"{_pct(stats['passRate']):>8}{_pct(stats['failRate']):>8}{_pct(stats['inconclusiveRate']):>9}"
+        )
+    lines.append("")
+    lines.append(
+        f"false assurance (hidden violation got PASS): {_pct(false_assurance_rate_2x2(cells))}"
+    )
+    lines.append(f"safe abstention (INCONCLUSIVE on faulty telemetry): {_pct(safe_abstention_rate(cells))}")
+    lines.append(f"behavior detection (clean telemetry): {_pct(behavior_detection_rate(cells))}")
+    lines.append(f"clean false positives: {_pct(clean_false_positive_rate(cells))}")
+    lines.append("")
+    lines.append("PASS rate: behavior x telemetry (0 = the fault is never hidden)")
+    matrix = behavior_by_telemetry_matrix(cells)
+    cols = sorted(next(iter(matrix.values()), {}))
+    header = f"{'behavior':<18}" + "".join(f"{c:>20}" for c in cols)
+    lines.append(header)
+    for behavior, row in matrix.items():
+        line = f"{behavior:<18}" + "".join(f"{_pct(row.get(c, 0.0)):>20}" for c in cols)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def render_condition_comparison(contract: Sequence[Mapping], baseline: Sequence[Mapping]) -> str:
+    """Side-by-side four-condition comparison between the evidence
+    contract and a baseline (behavior-only checks). The baseline's
+    PASS rate on hidden-violation cells is its false assurance; the
+    contract must drive it to zero by abstaining."""
+    a = condition_summary(contract)
+    b = condition_summary(baseline)
+    lines = ["condition comparison: evidence contract vs behavior-only baseline"]
+    lines.append(f"{'condition':<40}{'contract':>28}{'baseline':>28}")
+    lines.append(f"{'':<40}{'PASS / INCONCL':>28}{'PASS / INCONCL':>28}")
+    for condition in a:
+        ca, cb = a[condition], b.get(condition, {"runs": 0, "passRate": 0.0, "inconclusiveRate": 0.0})
+        lines.append(
+            f"{condition:<40}"
+            f"{_pct(ca['passRate']) + ' / ' + _pct(ca['inconclusiveRate']):>28}"
+            f"{_pct(cb['passRate']) + ' / ' + _pct(cb['inconclusiveRate']):>28}"
+        )
+    lines.append("")
+    lines.append(
+        f"false assurance: contract {_pct(false_assurance_rate_2x2(contract))}   "
+        f"baseline {_pct(false_assurance_rate_2x2(baseline))}"
+    )
+    lines.append(
+        f"safe abstention: contract {_pct(safe_abstention_rate(contract))}   "
+        f"baseline {_pct(safe_abstention_rate(baseline))}"
+    )
     return "\n".join(lines)
 
 
@@ -446,12 +611,20 @@ def main() -> None:
     parser.add_argument("--compare", type=str, action="append", default=[], help="additional artifacts; pairwise judge kappa + consensus")
     parser.add_argument("--delta", type=str, default="", help="second artifact; report per-fault detection deltas")
     parser.add_argument("--verify", action="store_true", help="check artifact integrity (signature, protocol)")
+    parser.add_argument("--false-assurance", action="store_true", help="render the four-condition false-assurance analysis")
+    parser.add_argument("--baseline", type=str, default="", help="behavior-only artifact for the condition comparison")
     args = parser.parse_args()
     artifact = load_results(args.results)
     a = artifact["cells"]
     if args.verify:
         print("integrity:", verify_integrity(artifact))
-    print(render_table(a))
+    if args.false_assurance:
+        if args.baseline:
+            print(render_condition_comparison(a, load_results(args.baseline)["cells"]))
+        else:
+            print(render_false_assurance(a, name=artifact.get("configName", "")))
+    else:
+        print(render_table(a))
     if args.compare:
         named = [(artifact.get("judgeBackend", "primary"), a)]
         for path in args.compare:

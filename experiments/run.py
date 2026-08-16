@@ -30,7 +30,7 @@ from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
-from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, checksum
+from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, build_false_assurance_grid, checksum
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
@@ -210,15 +210,20 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0, help="run only the first N cells")
     parser.add_argument("--pilot", action="store_true", help="curated small spread: clean + every fault x 2 seeds")
     parser.add_argument("--evidence", action="store_true", help="run the clean-behavior telemetry-fault grid")
+    parser.add_argument("--false-assurance", action="store_true", help="run the behavior x telemetry 2x2 grid")
     parser.add_argument("--trace-dir", type=Path, default=Path("artifacts/traces"), help="directory for clean trace artifacts")
     parser.add_argument("--no-traces", action="store_true", help="disable durable trace recording")
     parser.add_argument("--judge", choices=["gemini", "bedrock", "kimi"], default="gemini", help="judge backend for live mode")
+    parser.add_argument("--config", type=str, default="", help="config file name under watchtower/testdata (baseline runs)")
     args = parser.parse_args()
 
     if args.live and args.judge == "gemini" and not get_api_key("GEMINI_API_KEY"):
         raise SystemExit("--live --judge gemini needs GEMINI_API_KEY in .env")
 
-    if args.evidence:
+    if args.false_assurance:
+        cells = build_false_assurance_grid()
+        grid_checksum = checksum(cells)
+    elif args.evidence:
         cells = build_evidence_grid()
         grid_checksum = checksum(cells)
     elif args.pilot:
@@ -241,6 +246,8 @@ def main() -> None:
         ("live", "bedrock"): "experiment_live_bedrock_config.json",
         ("live", "kimi"): "experiment_live_kimi_config.json",
     }[("live" if args.live else "offline", args.judge)]
+    if args.config:
+        config_name = args.config
     config = str(REPO_ROOT / "watchtower" / "testdata" / config_name)
     config_checksum = file_checksum(config)
     env: dict[str, str] | None = None
@@ -289,8 +296,9 @@ def main() -> None:
             "cellsSignature": cells_signature(cells),
             "reportProtocolVersion": results[0].protocol,
             "mode": "live" if args.live else "offline",
-            "gridKind": "evidence" if args.evidence else "behavior",
+            "gridKind": "false_assurance" if args.false_assurance else "evidence" if args.evidence else "behavior",
             "judgeBackend": args.judge,
+            "configName": config_name,
             "traceDir": None if args.no_traces else str(args.trace_dir),
             "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "cells": [asdict(r) for r in results],
