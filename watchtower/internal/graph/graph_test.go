@@ -192,7 +192,7 @@ func TestReconstructPreservesObligationMetadata(t *testing.T) {
 		TraceID: "trace-obligation", SpanID: "root", Name: "agent.run",
 		StartTime: base, EndTime: base.Add(4 * time.Second), Status: model.StatusOK,
 		Attributes: map[string]string{model.WatchtowerCompleted: "true"},
-		Events: []model.Event{{Name: "supervisor.decision", Attributes: map[string]string{"action": "complete"}}},
+		Events:     []model.Event{{Name: "supervisor.decision", Attributes: map[string]string{"action": "complete"}}},
 	}
 	llm := model.Span{
 		TraceID: "trace-obligation", SpanID: "llm", ParentID: "root", Name: "chat",

@@ -1,14 +1,16 @@
-.PHONY: test vet serve demo live venv experiment experiment-evidence experiment-live experiment-bedrock experiment-agreement diagrams
+.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-live experiment-bedrock experiment-agreement diagrams
 
-test: ## go test -race + pytest
+test: ## go test -race (core + producer) + pytest
 	cd watchtower && go test ./... -race
+	cd producers/goproducer && go test ./...
 	.venv/bin/pytest tests -q
 
 diagrams: ## regenerate diagram PNGs from .excalidraw sources
 	./scripts/diagrams/export.sh
 
-vet: ## go vet ./...
+vet: ## go vet ./... (core + producer)
 	cd watchtower && go vet ./...
+	cd producers/goproducer && go vet ./...
 
 serve: ## run watchtower serve on :4318
 	cd watchtower && go run ./cmd/watchtower serve --addr :4318
@@ -22,6 +24,12 @@ live: ## live smoke test (needs GEMINI_API_KEY in .env)
 venv: ## create .venv and install harness + experiments
 	python3 -m venv .venv
 	.venv/bin/pip install -e .
+
+producer: ## build the Go reference producer (independent OTel producer)
+	cd producers/goproducer && go build -o /tmp/watchtower-goproducer .
+
+cross-producer: ## Phase 2.9 acceptance: two producers, one evidence contract
+	.venv/bin/python -m pytest tests/test_cross_producer.py -q
 
 experiment: ## offline matrix run + analysis (deterministic, free)
 	.venv/bin/python -m experiments.suite --out artifacts

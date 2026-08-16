@@ -16,7 +16,9 @@ const supervisorDecisionEvent = "supervisor.decision"
 // reconstruction, plus configured evidence-obligation failures, into
 // evidence findings. These findings do not claim a behavior violation;
 // they prevent the report from claiming PASS when the trace cannot
-// support that conclusion.
+// support that conclusion. Every finding names the claim it belongs to
+// and a practical recovery action, so an abstention says what to do
+// next instead of just declining to answer.
 func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 	if run == nil {
 		return nil
@@ -27,49 +29,60 @@ func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 		steps[step.SpanID] = step
 	}
 
-	findings := structuralFindings(run, steps)
-	if obligations.RequireRoot {
-		findings = append(findings, checkRoot(run, steps))
+	integrity := claimByName(obligations.Claims(), "trace_integrity")
+	findings := structuralFindings(run, steps, integrity)
+	claims := obligations.Claims()
+	if claim := claimByName(claims, "run_root"); claim != nil {
+		findings = append(findings, checkRoot(run, steps, claim))
 	}
-	if obligations.RequireAgentCompletion {
-		findings = append(findings, checkAgentCompletion(run.Steps, steps)...)
+	if claim := claimByName(claims, "agent_completion"); claim != nil {
+		findings = append(findings, checkAgentCompletion(run.Steps, steps, claim)...)
 	}
-	if obligations.RequireModelCorrelation {
-		findings = append(findings, checkModelCorrelation(run.Steps, steps)...)
+	if claim := claimByName(claims, "model_correlation"); claim != nil {
+		findings = append(findings, checkModelCorrelation(run.Steps, steps, claim)...)
 	}
-	if obligations.RequireToolResults {
-		findings = append(findings, checkToolResults(run.Steps, steps)...)
+	if claim := claimByName(claims, "tool_pairing"); claim != nil {
+		findings = append(findings, checkToolResults(run.Steps, steps, claim)...)
 	}
-	if obligations.RequireFinalAnswer {
-		findings = append(findings, checkFinalAnswer(run, steps))
+	if claim := claimByName(claims, "final_answer"); claim != nil {
+		findings = append(findings, checkFinalAnswer(run, steps, claim))
 	}
-	if obligations.RequireSupervisorDecision {
-		findings = append(findings, checkSupervisorDecision(run, steps))
+	if claim := claimByName(claims, "supervisor_decision"); claim != nil {
+		findings = append(findings, checkSupervisorDecision(run, steps, claim))
 	}
-	if obligations.RequireTemporalNesting {
-		findings = append(findings, checkTemporalNesting(run.Steps, steps)...)
+	if claim := claimByName(claims, "temporal_nesting"); claim != nil {
+		findings = append(findings, checkTemporalNesting(run.Steps, steps, claim)...)
 	}
 	return compactFindings(findings)
 }
 
-func structuralFindings(run *graph.Run, steps map[string]graph.Step) []Finding {
+func claimByName(claims []Claim, name string) *Claim {
+	for i := range claims {
+		if claims[i].Name == name {
+			return &claims[i]
+		}
+	}
+	return nil
+}
+
+func structuralFindings(run *graph.Run, steps map[string]graph.Step, claim *Claim) []Finding {
 	findings := make([]Finding, 0, len(run.Evidence.DuplicateSpanIDs)+len(run.Evidence.MissingParents))
 	for _, spanID := range run.Evidence.DuplicateSpanIDs {
 		findings = append(findings, evidenceFinding(
 			fmt.Sprintf("span id %q appeared more than once", spanID),
-			[]string{spanID}, spanID, steps,
+			[]string{spanID}, spanID, steps, claim,
 		))
 	}
 	for _, missing := range run.Evidence.MissingParents {
 		findings = append(findings, evidenceFinding(
 			fmt.Sprintf("span %q refers to missing parent %q", missing.SpanID, missing.ParentID),
-			[]string{missing.SpanID}, missing.ParentID, steps,
+			[]string{missing.SpanID}, missing.ParentID, steps, claim,
 		))
 	}
 	return findings
 }
 
-func checkRoot(run *graph.Run, steps map[string]graph.Step) Finding {
+func checkRoot(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
 	root, ok := steps[run.RootSpanID]
 	if ok && root.Kind == graph.StepAgent && root.Name == "agent.run" && root.ParentID == "" {
 		return Finding{}
@@ -83,10 +96,11 @@ func checkRoot(run *graph.Run, steps map[string]graph.Step) Finding {
 		spanIDs,
 		"agent.run with no parent",
 		steps,
+		claim,
 	)
 }
 
-func checkAgentCompletion(runSteps []graph.Step, steps map[string]graph.Step) []Finding {
+func checkAgentCompletion(runSteps []graph.Step, steps map[string]graph.Step, claim *Claim) []Finding {
 	var findings []Finding
 	for _, step := range runSteps {
 		if step.Kind != graph.StepAgent {
@@ -98,13 +112,13 @@ func checkAgentCompletion(runSteps []graph.Step, steps map[string]graph.Step) []
 		}
 		findings = append(findings, evidenceFinding(
 			fmt.Sprintf("agent span %q has no valid completion marker", step.SpanID),
-			[]string{step.SpanID}, model.WatchtowerCompleted, steps,
+			[]string{step.SpanID}, model.WatchtowerCompleted, steps, claim,
 		))
 	}
 	return findings
 }
 
-func checkModelCorrelation(runSteps []graph.Step, steps map[string]graph.Step) []Finding {
+func checkModelCorrelation(runSteps []graph.Step, steps map[string]graph.Step, claim *Claim) []Finding {
 	var findings []Finding
 	for _, step := range runSteps {
 		if step.Kind != graph.StepLLM {
@@ -128,13 +142,13 @@ func checkModelCorrelation(runSteps []graph.Step, steps map[string]graph.Step) [
 		}
 		findings = append(findings, evidenceFinding(
 			fmt.Sprintf("LLM span %q is missing correlation fields: %s", step.SpanID, strings.Join(missing, ", ")),
-			[]string{step.SpanID}, strings.Join(missing, ","), steps,
+			[]string{step.SpanID}, strings.Join(missing, ","), steps, claim,
 		))
 	}
 	return findings
 }
 
-func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step) []Finding {
+func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step, claim *Claim) []Finding {
 	var findings []Finding
 	byCallID := make(map[string]graph.Step)
 	for _, step := range runSteps {
@@ -144,12 +158,12 @@ func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step) []Find
 		if strings.TrimSpace(step.ToolCallID) == "" {
 			findings = append(findings, evidenceFinding(
 				fmt.Sprintf("tool span %q has no call id", step.SpanID),
-				[]string{step.SpanID}, model.ToolCallID, steps,
+				[]string{step.SpanID}, model.ToolCallID, steps, claim,
 			))
 		} else if previous, exists := byCallID[step.ToolCallID]; exists {
 			findings = append(findings, evidenceFinding(
 				fmt.Sprintf("tool call id %q is used by multiple spans", step.ToolCallID),
-				[]string{previous.SpanID, step.SpanID}, step.ToolCallID, steps,
+				[]string{previous.SpanID, step.SpanID}, step.ToolCallID, steps, claim,
 			))
 		} else {
 			byCallID[step.ToolCallID] = step
@@ -157,7 +171,7 @@ func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step) []Find
 		if _, valid := boolAttr(step, model.ToolResultOK); !valid {
 			findings = append(findings, evidenceFinding(
 				fmt.Sprintf("tool span %q has no valid result marker", step.SpanID),
-				[]string{step.SpanID}, model.ToolResultOK, steps,
+				[]string{step.SpanID}, model.ToolResultOK, steps, claim,
 			))
 		}
 	}
@@ -172,14 +186,14 @@ func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step) []Find
 			}
 			findings = append(findings, evidenceFinding(
 				fmt.Sprintf("LLM span %q expects tool result %q, but no matching tool span was observed", step.SpanID, callID),
-				[]string{step.SpanID}, callID, steps,
+				[]string{step.SpanID}, callID, steps, claim,
 			))
 		}
 	}
 	return findings
 }
 
-func checkFinalAnswer(run *graph.Run, steps map[string]graph.Step) Finding {
+func checkFinalAnswer(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
 	for _, step := range run.Steps {
 		if step.Kind != graph.StepLLM {
 			continue
@@ -199,10 +213,11 @@ func checkFinalAnswer(run *graph.Run, steps map[string]graph.Step) Finding {
 		spanIDs,
 		model.WatchtowerFinal,
 		steps,
+		claim,
 	)
 }
 
-func checkSupervisorDecision(run *graph.Run, steps map[string]graph.Step) Finding {
+func checkSupervisorDecision(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
 	root, ok := steps[run.RootSpanID]
 	if ok {
 		for _, event := range root.Events {
@@ -223,10 +238,11 @@ func checkSupervisorDecision(run *graph.Run, steps map[string]graph.Step) Findin
 		spanIDs,
 		supervisorDecisionEvent,
 		steps,
+		claim,
 	)
 }
 
-func checkTemporalNesting(runSteps []graph.Step, steps map[string]graph.Step) []Finding {
+func checkTemporalNesting(runSteps []graph.Step, steps map[string]graph.Step, claim *Claim) []Finding {
 	var findings []Finding
 	for _, step := range runSteps {
 		if step.ParentID == "" {
@@ -244,6 +260,7 @@ func checkTemporalNesting(runSteps []graph.Step, steps map[string]graph.Step) []
 			[]string{step.SpanID, parent.SpanID},
 			fmt.Sprintf("child=%s..%s parent=%s..%s", formatTime(step.StartTime), formatTime(step.EndTime), formatTime(parent.StartTime), formatTime(parent.EndTime)),
 			steps,
+			claim,
 		))
 	}
 	return findings
@@ -258,14 +275,14 @@ func boolAttr(step graph.Step, key string) (bool, bool) {
 	return value, err == nil
 }
 
-func evidenceFinding(message string, spanIDs []string, value string, steps map[string]graph.Step) Finding {
+func evidenceFinding(message string, spanIDs []string, value string, steps map[string]graph.Step, claim *Claim) Finding {
 	timestamps := make([]string, 0, len(spanIDs))
 	for _, spanID := range spanIDs {
 		if step, ok := steps[spanID]; ok && !step.StartTime.IsZero() {
 			timestamps = append(timestamps, formatTime(step.StartTime))
 		}
 	}
-	return Finding{
+	finding := Finding{
 		Verifier:   "evidence",
 		Kind:       FindingEvidenceGap,
 		Severity:   SeverityWarning,
@@ -274,6 +291,11 @@ func evidenceFinding(message string, spanIDs []string, value string, steps map[s
 		Timestamps: timestamps,
 		Value:      value,
 	}
+	if claim != nil {
+		finding.Claim = claim.Name
+		finding.Action = claim.Action
+	}
+	return finding
 }
 
 func formatTime(t time.Time) string {

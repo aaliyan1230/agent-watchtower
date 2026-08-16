@@ -51,6 +51,8 @@ type Finding struct {
 	Timestamps []string    `json:"timestamps,omitempty"` // RFC3339 of offending spans
 	Value      string      `json:"value,omitempty"`      // the offending value, if any
 	Source     string      `json:"source,omitempty"`     // judge model, when a judge produced it
+	Claim      string      `json:"claim,omitempty"`      // evidence claims name the claim whose support is missing
+	Action     string      `json:"action,omitempty"`     // recovery action for an evidence gap (recollect, replay, instrument)
 }
 
 // JudgeConfig is the JSON-configurable part of the judge slot. The

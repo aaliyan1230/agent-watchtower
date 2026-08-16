@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.8"
+const ProtocolVersion = "0.9"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string

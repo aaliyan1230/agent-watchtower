@@ -138,7 +138,7 @@ def test_replay_derives_faulted_copy_without_rerunning_agent(tmp_path, monkeypat
 
     def fake_post(endpoint, envelope):
         calls.append(envelope)
-        return {"traceId": "a" * 32, "verdict": "INCONCLUSIVE", "protocolVersion": "0.8"}
+        return {"traceId": "a" * 32, "verdict": "INCONCLUSIVE", "protocolVersion": "0.9"}
 
     monkeypatch.setattr(replay_module, "post_envelope", fake_post)
     report, derived, envelope = replay_module.replay(source_path, fault="drop_parent")
