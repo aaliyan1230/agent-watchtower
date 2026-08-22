@@ -21,9 +21,9 @@ demo: ## offline python demo: fake provider -> spans -> serve -> report
 live: ## live smoke test (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m harness.live_smoke
 
-venv: ## create .venv and install harness + experiments
+venv: ## create .venv and install harness + experiments (+ dev extras)
 	python3 -m venv .venv
-	.venv/bin/pip install -e .
+	.venv/bin/pip install -e ".[dev]"
 
 producer: ## build the Go reference producer (independent OTel producer)
 	cd producers/goproducer && go build -o /tmp/watchtower-goproducer .
