@@ -245,3 +245,73 @@ func TestReconstructSiblingOrderByTime(t *testing.T) {
 		}
 	}
 }
+
+func TestReconstructCausalEdgesFromLinks(t *testing.T) {
+	spans := syntheticTrace()
+	// s3 (a worker chat) causally depends on s2's tool result via a
+	// link, even though they are siblings under different parents.
+	for i := range spans {
+		if spans[i].SpanID == "s3" {
+			spans[i].Links = []model.Link{{
+				SpanID:     "s2",
+				Attributes: map[string]string{model.LinkPurpose: "data"},
+			}}
+		}
+	}
+	run, err := Reconstruct(spans)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if len(run.CausalEdges) != 1 {
+		t.Fatalf("causal edges = %+v, want one", run.CausalEdges)
+	}
+	edge := run.CausalEdges[0]
+	if edge.From != "s2" || edge.To != "s3" || edge.Purpose != "data" {
+		t.Fatalf("edge = %+v", edge)
+	}
+	if !run.Evidence.Complete() {
+		t.Fatalf("evidence = %+v, want complete", run.Evidence)
+	}
+}
+
+func TestReconstructMissingLinkTarget(t *testing.T) {
+	spans := syntheticTrace()
+	for i := range spans {
+		if spans[i].SpanID == "s4" {
+			spans[i].Links = []model.Link{{SpanID: "ghost-span"}}
+		}
+	}
+	run, err := Reconstruct(spans)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if run.Evidence.Complete() {
+		t.Fatalf("evidence = %+v, want incomplete for dangling link", run.Evidence)
+	}
+	if len(run.Evidence.MissingLinkTargets) != 1 {
+		t.Fatalf("missing link targets = %+v, want one", run.Evidence.MissingLinkTargets)
+	}
+	got := run.Evidence.MissingLinkTargets[0]
+	if got.SpanID != "s4" || got.LinkID != "ghost-span" {
+		t.Fatalf("missing link target = %+v", got)
+	}
+	if len(run.CausalEdges) != 0 {
+		t.Fatalf("causal edges = %+v, want none (target absent)", run.CausalEdges)
+	}
+}
+
+func TestReconstructIgnoresSelfAndEmptyLinks(t *testing.T) {
+	spans := syntheticTrace()
+	for i := range spans {
+		if spans[i].SpanID == "s1" {
+			spans[i].Links = []model.Link{{SpanID: "s1"}, {SpanID: ""}}
+		}
+	}
+	run, err := Reconstruct(spans)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if len(run.CausalEdges) != 0 {
+		t.Fatalf("causal edges = %+v, want none", run.CausalEdges)
+	}
+}

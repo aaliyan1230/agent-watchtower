@@ -54,6 +54,13 @@ func protoSpan(name string, id, parent []byte) *tracepb.Span {
 			TimeUnixNano: uint64(time.Date(2026, 8, 10, 10, 0, 0, 500*int(time.Millisecond), time.UTC).UnixNano()),
 			Attributes:   []*commonpb.KeyValue{{Key: "status", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "done"}}}},
 		}},
+		Links: []*tracepb.Span_Link{{
+			SpanId: []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88},
+			Attributes: []*commonpb.KeyValue{{
+				Key:   "watchtower.link.purpose",
+				Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "data"}},
+			}},
+		}},
 	}
 }
 
@@ -93,6 +100,9 @@ func TestDecodeHappyPath(t *testing.T) {
 	}
 	if len(s.Events) != 1 || s.Events[0].Name != "tool.result" || s.Events[0].Attributes["status"] != "done" {
 		t.Errorf("events = %+v", s.Events)
+	}
+	if len(s.Links) != 1 || s.Links[0].SpanID != "1122334455667788" || s.Links[0].Attributes["watchtower.link.purpose"] != "data" {
+		t.Errorf("links = %+v", s.Links)
 	}
 	if err := env.Validate(); err != nil {
 		t.Fatalf("decoded envelope should validate: %v", err)

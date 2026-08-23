@@ -1,6 +1,11 @@
 """The experiment grid is deterministic and complete."""
 
-from experiments.suite import build_evidence_grid, build_false_assurance_grid, build_grid, checksum
+from experiments.suite import (
+    build_evidence_grid,
+    build_false_assurance_grid,
+    build_grid,
+    checksum,
+)
 
 
 def test_grid_has_clean_controls():
@@ -19,7 +24,7 @@ def test_grid_is_deterministic():
 
 def test_evidence_grid_has_clean_controls_and_adversarial_faults():
     cells = build_evidence_grid(seeds=[1], models=["flash"], runs=1)
-    assert len(cells) == 11
+    assert len(cells) == 13
     assert [c.evidence_fault for c in cells] == [
         None,
         "drop_parent",
@@ -32,13 +37,15 @@ def test_evidence_grid_has_clean_controls_and_adversarial_faults():
         "late_span",
         "drop_attribute",
         "sample_spans",
+        "drop_link",
+        "orphan_link_target",
     ]
     assert all(c.fault is None for c in cells)
 
 
 def test_false_assurance_grid_crosses_all_conditions():
     cells = build_false_assurance_grid(seeds=[1], models=["flash"])
-    assert len(cells) == 7 * 11  # behavior x telemetry
+    assert len(cells) == 7 * 13  # behavior x telemetry
     conditions = {(c.fault is None, c.evidence_fault is None) for c in cells}
     assert conditions == {(True, True), (True, False), (False, True), (False, False)}
     assert all(c.run == 1 for c in cells)

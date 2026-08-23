@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from opentelemetry import context, trace
-from opentelemetry.trace import Status, StatusCode, get_current_span
+from opentelemetry.trace import Link, Status, StatusCode, get_current_span
 
 from . import semconv
 from .providers import Provider, ProviderResponse, tool_schema
@@ -88,8 +88,14 @@ class Worker:
         self.agent_id = agent_id
         self.halted = False
         self.rerouted = False
+        self._last_tool_ctx = None
 
-    def run(self, task: str, parent_context=None, monitor: Callable[[StepInfo], str] | None = None) -> str:
+    def run(
+        self,
+        task: str,
+        parent_context=None,
+        monitor: Callable[[StepInfo], str] | None = None,
+    ) -> str:
         """Run one task to completion (or max_steps) and return the
         final answer. The monitor, if any, gets a StepInfo after every
         turn and tool call and may return "halt" or "reroute" to stop
@@ -102,7 +108,9 @@ class Worker:
         ]
         tool_schemas = [t.schema() for t in self._tools.values()]
         with self._tracer.start_as_current_span(
-            "agent.run", context=parent_context, attributes={semconv.AGENT_NAME: self.name}
+            "agent.run",
+            context=parent_context,
+            attributes={semconv.AGENT_NAME: self.name},
         ) as run_span:
             final = False
             answer = ""
@@ -117,18 +125,36 @@ class Worker:
                             messages.append(resp.assistant_message)
                         for tc in resp.tool_calls:
                             ok, result = self._exec_tool(tc, step)
-                            messages.append({"role": "tool", "content": result, "tool_call_id": tc.get("id", "")})
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "content": result,
+                                    "tool_call_id": tc.get("id", ""),
+                                }
+                            )
                             if monitor:
-                                action = monitor(StepInfo(
-                                    worker=self.name, step=step, kind="tool",
-                                    tool=tc["name"], tool_ok=ok,
-                                    tokens=resp.input_tokens + resp.output_tokens,
-                                ))
+                                action = monitor(
+                                    StepInfo(
+                                        worker=self.name,
+                                        step=step,
+                                        kind="tool",
+                                        tool=tc["name"],
+                                        tool_ok=ok,
+                                        tokens=resp.input_tokens + resp.output_tokens,
+                                    )
+                                )
                                 if action != "continue":
                                     return self._stop(action)
                         continue
                     if monitor:
-                        action = monitor(StepInfo(worker=self.name, step=step, kind="llm", tokens=resp.input_tokens + resp.output_tokens))
+                        action = monitor(
+                            StepInfo(
+                                worker=self.name,
+                                step=step,
+                                kind="llm",
+                                tokens=resp.input_tokens + resp.output_tokens,
+                            )
+                        )
                         if action != "continue":
                             return self._stop(action)
                     answer = _strip_fences(resp.content)
@@ -151,15 +177,31 @@ class Worker:
         self.halted = True
         return "(halted by supervisor)"
 
+    def _data_dependency_links(self) -> list[Link] | None:
+        """Return a link from the next chat turn to the tool span whose
+        result it consumes, if one ran in the previous turn. A worker
+        observing a tool result and then reasoning about it is a real
+        causal dependency that sibling spans under the same agent.run
+        parent cannot express — that edge is what order-invariant
+        verification needs."""
+        ctx = getattr(self, "_last_tool_ctx", None)
+        if ctx is None:
+            return None
+        return [Link(ctx, attributes={semconv.LINK_PURPOSE: "data"})]
+
     def _turn(self, messages, tool_schemas, step: int) -> ProviderResponse:
+        links = self._data_dependency_links()
         with self._tracer.start_as_current_span(
             "chat",
+            links=links,
             attributes={
                 semconv.AGENT_NAME: self.name,
                 semconv.STEP_INDEX: str(step),
                 semconv.GEN_AI_OPERATION_NAME: "chat",
                 semconv.GEN_AI_SYSTEM: self._provider.name,
-                semconv.GEN_AI_REQUEST_MODEL: getattr(self._provider, "model", "unknown"),
+                semconv.GEN_AI_REQUEST_MODEL: getattr(
+                    self._provider, "model", "unknown"
+                ),
             },
         ) as span:
             try:
@@ -206,7 +248,13 @@ class Worker:
                 semconv.TOOL_CALL_ID: call_id,
                 semconv.WATCHTOWER_TOOL_ARGS: json.dumps(args),
             },
-        ):
+        ) as tool_span:
+            # The next chat turn consumes this span's result, so it must
+            # be visible as a causal predecessor: sibling spans under the
+            # same agent.run parent carry no ordering, and links exist
+            # exactly to record that an observation happened before the
+            # reasoning it informed.
+            self._last_tool_ctx = tool_span.get_span_context()
             tool = self._tools.get(name)
             if tool is None:
                 get_current_span().set_attribute(semconv.TOOL_RESULT_OK, "false")

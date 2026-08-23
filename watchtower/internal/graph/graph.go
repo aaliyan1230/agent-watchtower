@@ -77,27 +77,51 @@ type MissingParent struct {
 	ParentID string `json:"parentSpanId"`
 }
 
+// MissingLinkTarget records a causal link whose destination span was not
+// present in the received trace. The edge cannot be reconstructed, so
+// verification must treat the causal structure as incomplete — the
+// missing span may still arrive, and a PASS would be premature.
+type MissingLinkTarget struct {
+	SpanID  string `json:"spanId"` // the span carrying the link
+	LinkID  string `json:"linkId"` // the linked (causal) span id
+	Purpose string `json:"purpose,omitempty"`
+}
+
 // Evidence summarizes telemetry integrity findings discovered while
 // reconstructing the run. A non-empty field means the trace is usable
 // for inspection but not sufficient for a confident PASS.
 type Evidence struct {
-	DuplicateSpanIDs []string        `json:"duplicateSpanIds,omitempty"`
-	MissingParents   []MissingParent `json:"missingParents,omitempty"`
+	DuplicateSpanIDs   []string            `json:"duplicateSpanIds,omitempty"`
+	MissingParents     []MissingParent     `json:"missingParents,omitempty"`
+	MissingLinkTargets []MissingLinkTarget `json:"missingLinkTargets,omitempty"`
 }
 
 // Complete reports whether reconstruction found any structural evidence
 // gaps. It does not claim that the agent behaved correctly.
 func (e Evidence) Complete() bool {
-	return len(e.DuplicateSpanIDs) == 0 && len(e.MissingParents) == 0
+	return len(e.DuplicateSpanIDs) == 0 && len(e.MissingParents) == 0 && len(e.MissingLinkTargets) == 0
+}
+
+// CausalEdge is a reconstructed happens-before dependency between two
+// spans: From must be verified before To. Parent-child links from the
+// tree already imply such an edge; CausalEdges carries the *additional*
+// non-parent dependencies declared by span links, so concurrent
+// structure survives reconstruction instead of collapsing into whatever
+// order the flat list happened to arrive in.
+type CausalEdge struct {
+	From    string `json:"from"` // causal predecessor (the linked span)
+	To      string `json:"to"`   // dependent span (the span carrying the link)
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // Run is the reconstructed agent run: one trace, ordered steps, budget.
 type Run struct {
-	TraceID    string
-	RootSpanID string
-	Steps      []Step
-	Budget     Budget
-	Evidence   Evidence
+	TraceID     string
+	RootSpanID  string
+	Steps       []Step
+	Budget      Budget
+	Evidence    Evidence
+	CausalEdges []CausalEdge
 }
 
 // ToolCalls returns just the tool steps, in run order — the loop
@@ -158,6 +182,39 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 			}
 		}
 	}
+
+	// Causal edges come from span links, the OTLP-native out-of-tree
+	// dependency carrier. A link whose target is absent means the causal
+	// structure is incomplete — the missing span may still arrive, so
+	// this trace cannot support a confident PASS.
+	var causalEdges []CausalEdge
+	for _, s := range unique {
+		for _, l := range s.Links {
+			if l.SpanID == "" || l.SpanID == s.SpanID {
+				continue
+			}
+			purpose, _ := l.Attributes[model.LinkPurpose]
+			if byID[l.SpanID] == nil {
+				evidence.MissingLinkTargets = append(evidence.MissingLinkTargets, MissingLinkTarget{
+					SpanID: s.SpanID, LinkID: l.SpanID, Purpose: purpose,
+				})
+				continue
+			}
+			causalEdges = append(causalEdges, CausalEdge{From: l.SpanID, To: s.SpanID, Purpose: purpose})
+		}
+	}
+	sort.Slice(causalEdges, func(i, j int) bool {
+		if causalEdges[i].From == causalEdges[j].From {
+			return causalEdges[i].To < causalEdges[j].To
+		}
+		return causalEdges[i].From < causalEdges[j].From
+	})
+	sort.Slice(evidence.MissingLinkTargets, func(i, j int) bool {
+		if evidence.MissingLinkTargets[i].SpanID == evidence.MissingLinkTargets[j].SpanID {
+			return evidence.MissingLinkTargets[i].LinkID < evidence.MissingLinkTargets[j].LinkID
+		}
+		return evidence.MissingLinkTargets[i].SpanID < evidence.MissingLinkTargets[j].SpanID
+	})
 	sort.Strings(evidence.DuplicateSpanIDs)
 	sort.Slice(evidence.MissingParents, func(i, j int) bool {
 		if evidence.MissingParents[i].SpanID == evidence.MissingParents[j].SpanID {
@@ -185,7 +242,7 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 		return roots[i].StartTime.Before(roots[j].StartTime)
 	})
 
-	run := &Run{TraceID: traceID, RootSpanID: roots[0].SpanID, Evidence: evidence}
+	run := &Run{TraceID: traceID, RootSpanID: roots[0].SpanID, Evidence: evidence, CausalEdges: causalEdges}
 	var order int
 	var walk func(*model.Span)
 	walk = func(s *model.Span) {

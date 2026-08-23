@@ -87,6 +87,7 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 				Status: StatusError, StatusMsg: "timeout",
 				Attributes: map[string]string{ToolName: "search"},
 				Events:     []Event{{Name: "tool.result", Time: time.Unix(10, 5).UTC()}},
+				Links:      []Link{{SpanID: "s0", Attributes: map[string]string{LinkPurpose: "data"}}},
 			},
 		},
 	}
@@ -100,6 +101,9 @@ func TestEnvelopeJSONRoundTrip(t *testing.T) {
 	}
 	if len(got.Spans) != 2 || got.Spans[1].StatusMsg != "timeout" {
 		t.Fatalf("round trip lost data: %+v", got.Spans)
+	}
+	if got.Spans[1].Links[0].SpanID != "s0" || got.Spans[1].Links[0].Attributes[LinkPurpose] != "data" {
+		t.Fatalf("round trip lost links: %+v", got.Spans[1].Links)
 	}
 	if err := got.Validate(); err != nil {
 		t.Fatalf("Validate() after round trip: %v", err)

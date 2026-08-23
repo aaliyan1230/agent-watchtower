@@ -44,4 +44,9 @@ const (
 	// raw model output; the schema verifier parses and checks it.
 	WatchtowerContract = "watchtower.contract"
 	WatchtowerOutput   = "watchtower.output"
+
+	// Link purpose: the causal role a link edge plays in a concurrent
+	// run. Producers stamp this on link attributes so the canonicalizer
+	// can classify edges (e.g. data dependency vs. supervisor signal).
+	LinkPurpose = "watchtower.link.purpose" // ours: "data" | "control"
 )
