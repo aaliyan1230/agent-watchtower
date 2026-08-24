@@ -38,20 +38,20 @@ func TestVerdictFor(t *testing.T) {
 			{Verifier: "policy", Severity: verify.SeverityCritical},
 			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
 		}, want: VerdictFail},
-		{name: "unclosed trace is unknown", findings: []verify.Finding{
+		{name: "unclosed trace is inconclusive", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
-		}, want: VerdictUnknown},
-		{name: "unclosed even with critical violation is unknown", findings: []verify.Finding{
+		}, want: VerdictInconclusive},
+		{name: "unclosed even with critical violation is inconclusive", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
 			{Verifier: "policy", Severity: verify.SeverityCritical},
-		}, want: VerdictUnknown},
+		}, want: VerdictInconclusive},
 		{name: "unclosed beats judge critical", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
 			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
-		}, want: VerdictUnknown},
+		}, want: VerdictInconclusive},
 		{name: "unclosed no premature pass", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
-		}, want: VerdictUnknown},
+		}, want: VerdictInconclusive},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

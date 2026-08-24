@@ -116,7 +116,7 @@ class EvidenceFaultExporter(SpanExporter):
     @staticmethod
     def _truncate_closed_marker(batch):
         """Remove the trace-closure marker so the trace looks still open.
-        The three-valued verifier must then answer UNKNOWN, not PASS —
+        The three-valued verifier must then answer INCONCLUSIVE, not PASS —
         the premature-pass hazard made observable."""
         for i, span in enumerate(batch):
             attrs = dict(span.attributes)

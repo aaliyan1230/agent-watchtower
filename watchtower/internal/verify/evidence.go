@@ -62,7 +62,8 @@ func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 // checkTraceClosed abstains when the run carries no explicit end-of-trace
 // marker: it may still be receiving causally relevant spans, and a PASS
 // now would be a false all-clear. This is the evidence-gap half of the
-// three-valued verdict — the report layer maps the finding to UNKNOWN.
+// three-valued verdict — the report layer maps the finding to
+// INCONCLUSIVE.
 func checkTraceClosed(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
 	if run.Closed {
 		return Finding{}

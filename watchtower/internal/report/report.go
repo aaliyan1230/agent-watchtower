@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.11"
+const ProtocolVersion = "0.12"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -26,7 +26,6 @@ const (
 	VerdictFlagged      Verdict = "FLAGGED"
 	VerdictInconclusive Verdict = "INCONCLUSIVE"
 	VerdictFail         Verdict = "FAIL"
-	VerdictUnknown      Verdict = "UNKNOWN"
 )
 
 // VerifierSummary is the per-verifier account the experiments layer
@@ -85,11 +84,12 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 // verdictFor maps findings to a verdict. Ordering is deliberate and
 // runs from strongest-to-weakest confidence: an observed critical
 // violation fails unless the trace was never declared closed; an
-// unclosed trace is UNKNOWN (spans may still arrive, so even a FAIL
-// seen so far cannot be trusted); a closed-but-incomplete trace
-// abstains INCONCLUSIVE; a judge critical finding fails when the
-// channel supports it; warnings flag. Only a closed, complete, clean
-// run passes — the paper's "no premature PASS" contract.
+// unclosed trace abstains INCONCLUSIVE (spans may still arrive, so even
+// a FAIL seen so far cannot be trusted — the paper's "no premature
+// PASS" contract); a closed-but-incomplete trace also abstains
+// INCONCLUSIVE; a judge critical finding fails when the channel
+// supports it; warnings flag. Only a closed, complete, clean run
+// passes.
 func verdictFor(findings []verify.Finding) Verdict {
 	detCritical, judgeCritical := false, false
 	warning, evidenceGap, unclosed := false, false, false
@@ -114,7 +114,7 @@ func verdictFor(findings []verify.Finding) Verdict {
 	}
 	switch {
 	case unclosed:
-		return VerdictUnknown
+		return VerdictInconclusive
 	case detCritical:
 		return VerdictFail
 	case evidenceGap:
