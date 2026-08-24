@@ -11,10 +11,14 @@ from experiments.analyze import (
     evidence_gap_preservation,
     false_assurance_rate_2x2,
     false_positive_rate,
+    fault_recall_late,
+    flip_rate,
     judge_consensus,
     per_verifier_detection,
+    premature_pass_rate,
     render_condition_comparison,
     safe_abstention_rate,
+    verdict_calibration,
 )
 
 
@@ -23,12 +27,27 @@ def _fa_cell(behavior, telemetry, verdict):
 
 
 def test_condition_of_maps_four_cells():
-    assert condition_of(_fa_cell(None, None, "PASS")) == ("clean_behavior", "clean_telemetry")
-    assert condition_of(_fa_cell("loop", None, "FAIL")) == ("faulty_behavior", "clean_telemetry")
-    assert condition_of(_fa_cell(None, "drop_tool_result", "INCONCLUSIVE")) == ("clean_behavior", "faulty_telemetry")
-    assert condition_of(_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")) == ("faulty_behavior", "faulty_telemetry")
+    assert condition_of(_fa_cell(None, None, "PASS")) == (
+        "clean_behavior",
+        "clean_telemetry",
+    )
+    assert condition_of(_fa_cell("loop", None, "FAIL")) == (
+        "faulty_behavior",
+        "clean_telemetry",
+    )
+    assert condition_of(_fa_cell(None, "drop_tool_result", "INCONCLUSIVE")) == (
+        "clean_behavior",
+        "faulty_telemetry",
+    )
+    assert condition_of(_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")) == (
+        "faulty_behavior",
+        "faulty_telemetry",
+    )
     # reordering is a semantics-preserving control, not a fault
-    assert condition_of(_fa_cell(None, "reorder_spans", "PASS")) == ("clean_behavior", "clean_telemetry")
+    assert condition_of(_fa_cell(None, "reorder_spans", "PASS")) == (
+        "clean_behavior",
+        "clean_telemetry",
+    )
 
 
 def test_false_assurance_rates():
@@ -51,8 +70,12 @@ def test_condition_summary_rates():
     ]
     summary = condition_summary(cells)
     assert summary["clean_behavior x clean_telemetry"]["passRate"] == pytest.approx(1.0)
-    assert summary["faulty_behavior x clean_telemetry"]["failRate"] == pytest.approx(1.0)
-    assert summary["clean_behavior x faulty_telemetry"]["inconclusiveRate"] == pytest.approx(1.0)
+    assert summary["faulty_behavior x clean_telemetry"]["failRate"] == pytest.approx(
+        1.0
+    )
+    assert summary["clean_behavior x faulty_telemetry"][
+        "inconclusiveRate"
+    ] == pytest.approx(1.0)
 
 
 def test_behavior_by_telemetry_matrix_pass_rates():
@@ -167,3 +190,63 @@ def test_kappa_mismatched_lengths():
 def test_judge_consensus():
     votes = [[True, False, True], [False, True, True], [True, True, False]]
     assert judge_consensus(votes) == [True, True, True]
+
+
+def _causal_cell(serials, closed=True, fault=None):
+    return {
+        "checked": True,
+        "serializationVerdicts": list(serials),
+        "closed": closed,
+        "evidenceFault": fault,
+        "budget": {"totalTokens": 100, "durationMs": 50},
+    }
+
+
+def test_flip_rate():
+    cells = [
+        _causal_cell(["PASS", "PASS", "PASS"]),
+        _causal_cell(["PASS", "FAIL"]),  # a flip
+        _causal_cell(["INCONCLUSIVE", "INCONCLUSIVE"]),
+    ]
+    rate, n = flip_rate(cells)
+    assert n == 3
+    assert rate == pytest.approx(1 / 3)
+    # No multi-serialization traces -> None
+    assert flip_rate([_causal_cell(["PASS"])]) == (None, 0)
+
+
+def test_premature_pass_rate():
+    cells = [
+        _causal_cell(["PASS"], closed=False),  # premature PASS
+        _causal_cell(["INCONCLUSIVE"], closed=False),
+        _causal_cell(["PASS"], closed=True),
+    ]
+    rate, n = premature_pass_rate(cells)
+    assert n == 2
+    assert rate == pytest.approx(0.5)
+    assert premature_pass_rate([_causal_cell(["PASS"], closed=True)]) == (None, 0)
+
+
+def test_fault_recall_late():
+    cells = [
+        _causal_cell(["INCONCLUSIVE"], fault="orphan_link_target"),  # caught
+        _causal_cell(["PASS"], fault="orphan_link_target"),  # missed
+        _causal_cell(["PASS"], fault="truncate_closed"),  # missed
+        _causal_cell(["PASS"], fault=None),
+    ]
+    recall = fault_recall_late(cells)
+    assert recall["orphan_link_target"] == pytest.approx(0.5)
+    assert recall["truncate_closed"] == pytest.approx(0.0)
+    assert fault_recall_late([_causal_cell(["PASS"])]) == {}
+
+
+def test_verdict_calibration():
+    cells = [
+        _causal_cell(["PASS", "PASS"], fault="truncate_closed"),
+        _causal_cell(["INCONCLUSIVE"], fault="truncate_closed"),
+    ]
+    cal = verdict_calibration(cells)
+    key = "closed x truncate_closed"
+    assert key in cal
+    assert cal[key]["passRate"] == pytest.approx(0.5)
+    assert cal[key]["inconclusiveRate"] == pytest.approx(0.5)

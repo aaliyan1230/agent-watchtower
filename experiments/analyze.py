@@ -110,6 +110,7 @@ def judge_consensus(judge_votes: Sequence[Sequence[bool]]) -> Sequence[bool]:
 
 # --- Phase 2: analysis over collected results artifacts -------------------
 
+
 def load_results(path: str) -> dict:
     """Load a results artifact produced by experiments.run."""
     with open(path) as fh:
@@ -118,7 +119,11 @@ def load_results(path: str) -> dict:
 
 def _fault_label(result: Mapping) -> str | None:
     """Return the behavior or telemetry fault label for one cell."""
-    return result.get("fault") or result.get("evidence_fault") or result.get("evidenceFault")
+    return (
+        result.get("fault")
+        or result.get("evidence_fault")
+        or result.get("evidenceFault")
+    )
 
 
 EVIDENCE_CONTROLS = {"reorder_spans"}
@@ -178,9 +183,7 @@ def false_assurance_rate_2x2(results: Sequence[Mapping]) -> float:
     """Fraction of hidden-violation cells (faulty behavior + disruptive
     telemetry) that returned PASS — a false all-clear."""
     runs = [
-        r
-        for r in results
-        if condition_of(r) == ("faulty_behavior", "faulty_telemetry")
+        r for r in results if condition_of(r) == ("faulty_behavior", "faulty_telemetry")
     ]
     if not runs:
         return 0.0
@@ -199,7 +202,9 @@ def safe_abstention_rate(results: Sequence[Mapping]) -> float:
 def behavior_detection_rate(results: Sequence[Mapping]) -> float:
     """Detection on clean telemetry: faulty behavior must be caught
     when the channel is intact."""
-    runs = [r for r in results if condition_of(r) == ("faulty_behavior", "clean_telemetry")]
+    runs = [
+        r for r in results if condition_of(r) == ("faulty_behavior", "clean_telemetry")
+    ]
     if not runs:
         return 0.0
     return sum(r.get("verdict") in ("FAIL", "FLAGGED") for r in runs) / len(runs)
@@ -208,7 +213,9 @@ def behavior_detection_rate(results: Sequence[Mapping]) -> float:
 def clean_false_positive_rate(results: Sequence[Mapping]) -> float:
     """FPR on the fully clean condition: nothing wrong, nothing
     reported."""
-    runs = [r for r in results if condition_of(r) == ("clean_behavior", "clean_telemetry")]
+    runs = [
+        r for r in results if condition_of(r) == ("clean_behavior", "clean_telemetry")
+    ]
     if not runs:
         return 0.0
     return sum(r.get("verdict") != "PASS" for r in runs) / len(runs)
@@ -253,7 +260,11 @@ def behavior_by_telemetry_matrix(results: Sequence[Mapping]) -> dict:
                 if (_behavior_fault(r) or "clean") == behavior
                 and (_telemetry_fault(r) or "clean") == telemetry
             ]
-            row[telemetry] = sum(r.get("verdict") == "PASS" for r in runs) / len(runs) if runs else 0.0
+            row[telemetry] = (
+                sum(r.get("verdict") == "PASS" for r in runs) / len(runs)
+                if runs
+                else 0.0
+            )
         matrix[behavior] = row
     return matrix
 
@@ -288,12 +299,15 @@ def fault_coverage(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
     """For each fault type, the fraction of its runs each verifier
     caught — the "where deterministic catches what" matrix."""
     faults = sorted({_positive_label(r) for r in results if _positive_label(r)})
-    verifiers = sorted({f["verifier"] for r in results if _positive_label(r) for f in r["findings"]})
+    verifiers = sorted(
+        {f["verifier"] for r in results if _positive_label(r) for f in r["findings"]}
+    )
     out: dict[str, dict[str, float]] = {}
     for fault in faults:
         runs = [r for r in results if _positive_label(r) == fault]
         out[fault] = {
-            v: sum(any(f["verifier"] == v for f in r["findings"]) for r in runs) / len(runs)
+            v: sum(any(f["verifier"] == v for f in r["findings"]) for r in runs)
+            / len(runs)
             for v in verifiers
         }
     return out
@@ -350,8 +364,20 @@ def judge_cost_summary(results: Sequence[Mapping]) -> dict:
         usage = r.get("judge_usage") or {}
         if not usage:
             continue
-        model = next((f.get("source", "") for f in r.get("findings", []) if f.get("verifier") == "judge"), r.get("judge_model", "")) or "unknown"
-        used.setdefault(model, []).append((usage.get("inputTokens", 0), usage.get("outputTokens", 0)))
+        model = (
+            next(
+                (
+                    f.get("source", "")
+                    for f in r.get("findings", [])
+                    if f.get("verifier") == "judge"
+                ),
+                r.get("judge_model", ""),
+            )
+            or "unknown"
+        )
+        used.setdefault(model, []).append(
+            (usage.get("inputTokens", 0), usage.get("outputTokens", 0))
+        )
     out: dict[str, dict] = {}
     for model, samples in used.items():
         n = len(samples)
@@ -363,7 +389,11 @@ def judge_cost_summary(results: Sequence[Mapping]) -> dict:
             "meanInputTokens": in_t,
             "meanOutputTokens": out_t,
             "estUsdPerRun": (in_t * price[0] + out_t * price[1]) / 1e6,
-            "estUsdTotal": (sum(s[0] for s in samples) * price[0] + sum(s[1] for s in samples) * price[1]) / 1e6,
+            "estUsdTotal": (
+                sum(s[0] for s in samples) * price[0]
+                + sum(s[1] for s in samples) * price[1]
+            )
+            / 1e6,
         }
     return out
 
@@ -381,7 +411,9 @@ def judge_vs_deterministic(results: Sequence[Mapping]) -> tuple[float | None, in
     return cohen_kappa(det, jdg), len(judged)
 
 
-def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float | None, int]:
+def judge_agreement(
+    a: Sequence[Mapping], b: Sequence[Mapping]
+) -> tuple[float | None, int]:
     """Kappa between two judges' opinions on the same runs, matched by
     (fault, seed, run) — the inter-provider agreement metric (e.g.
     Gemini judge vs Bedrock judge)."""
@@ -400,7 +432,9 @@ def judge_agreement(a: Sequence[Mapping], b: Sequence[Mapping]) -> tuple[float |
     return cohen_kappa(a_flags, b_flags), len(a_flags)
 
 
-def judge_agreement_matrix(named: Sequence[tuple[str, Sequence[Mapping]]]) -> tuple[dict, int]:
+def judge_agreement_matrix(
+    named: Sequence[tuple[str, Sequence[Mapping]]],
+) -> tuple[dict, int]:
     """Pairwise judge kappa plus each judge's agreement with the
     majority consensus (judge_consensus), over runs all judges saw.
     The 3-way inter-judge consistency table for the paper."""
@@ -410,13 +444,23 @@ def judge_agreement_matrix(named: Sequence[tuple[str, Sequence[Mapping]]]) -> tu
     common = set(key(r) for r in cells[0])
     for c in cells[1:]:
         common &= {key(r) for r in c}
-    order = sorted(common, key=lambda t: (t[0] is not None, t[0] or "", t[1], t[2], t[3]))
+    order = sorted(
+        common, key=lambda t: (t[0] is not None, t[0] or "", t[1], t[2], t[3])
+    )
     flags = {
-        name: [any(f["verifier"] == "judge" for f in next(r for r in c if key(r) == k)["findings"]) for k in order]
+        name: [
+            any(
+                f["verifier"] == "judge"
+                for f in next(r for r in c if key(r) == k)["findings"]
+            )
+            for k in order
+        ]
         for name, c in zip(names, cells)
     }
     consensus = judge_consensus([flags[n] for n in names])
-    out: dict[str, dict[str, float]] = {n: {"consensus": cohen_kappa(flags[n], consensus)} for n in names}
+    out: dict[str, dict[str, float]] = {
+        n: {"consensus": cohen_kappa(flags[n], consensus)} for n in names
+    }
     for i, a in enumerate(names):
         for j, b in enumerate(names):
             if i < j:
@@ -502,9 +546,13 @@ def render_delta(d: Mapping) -> str:
         if key == "pairedRuns":
             continue
         if key == "clean":
-            lines.append(f"  clean     fprA={row['fprA']:.0%} fprB={row['fprB']:.0%} delta={row['delta']:+.0%}")
+            lines.append(
+                f"  clean     fprA={row['fprA']:.0%} fprB={row['fprB']:.0%} delta={row['delta']:+.0%}"
+            )
         else:
-            lines.append(f"  {key:<18} detA={row['detA']:.0%} detB={row['detB']:.0%} delta={row['delta']:+.0%}")
+            lines.append(
+                f"  {key:<18} detA={row['detA']:.0%} detB={row['detB']:.0%} delta={row['delta']:+.0%}"
+            )
     return "\n".join(lines)
 
 
@@ -526,8 +574,12 @@ def render_false_assurance(results: Sequence[Mapping], name: str = "") -> str:
     lines.append(
         f"false assurance (hidden violation got PASS): {_pct(false_assurance_rate_2x2(cells))}"
     )
-    lines.append(f"safe abstention (INCONCLUSIVE on faulty telemetry): {_pct(safe_abstention_rate(cells))}")
-    lines.append(f"behavior detection (clean telemetry): {_pct(behavior_detection_rate(cells))}")
+    lines.append(
+        f"safe abstention (INCONCLUSIVE on faulty telemetry): {_pct(safe_abstention_rate(cells))}"
+    )
+    lines.append(
+        f"behavior detection (clean telemetry): {_pct(behavior_detection_rate(cells))}"
+    )
     lines.append(f"clean false positives: {_pct(clean_false_positive_rate(cells))}")
     lines.append("")
     lines.append("PASS rate: behavior x telemetry (0 = the fault is never hidden)")
@@ -543,13 +595,19 @@ def render_false_assurance(results: Sequence[Mapping], name: str = "") -> str:
         preserved, n_gaps = evidence_gap_preservation(cells)
         lines.append("")
         if kappa is not None:
-            lines.append(f"judge vs deterministic kappa (n={n_judged} judged runs): {kappa:.2f}")
+            lines.append(
+                f"judge vs deterministic kappa (n={n_judged} judged runs): {kappa:.2f}"
+            )
         if preserved is not None:
-            lines.append(f"evidence gaps preserved under judge: {_pct(preserved)} ({n_gaps} gap cells)")
+            lines.append(
+                f"evidence gaps preserved under judge: {_pct(preserved)} ({n_gaps} gap cells)"
+            )
     return "\n".join(lines)
 
 
-def render_condition_comparison(contract: Sequence[Mapping], baseline: Sequence[Mapping]) -> str:
+def render_condition_comparison(
+    contract: Sequence[Mapping], baseline: Sequence[Mapping]
+) -> str:
     """Side-by-side four-condition comparison between the evidence
     contract and a baseline (behavior-only checks). The baseline's
     PASS rate on hidden-violation cells is its false assurance; the
@@ -560,7 +618,10 @@ def render_condition_comparison(contract: Sequence[Mapping], baseline: Sequence[
     lines.append(f"{'condition':<40}{'contract':>28}{'baseline':>28}")
     lines.append(f"{'':<40}{'PASS / INCONCL':>28}{'PASS / INCONCL':>28}")
     for condition in a:
-        ca, cb = a[condition], b.get(condition, {"runs": 0, "passRate": 0.0, "inconclusiveRate": 0.0})
+        ca, cb = (
+            a[condition],
+            b.get(condition, {"runs": 0, "passRate": 0.0, "inconclusiveRate": 0.0}),
+        )
         lines.append(
             f"{condition:<40}"
             f"{_pct(ca['passRate']) + ' / ' + _pct(ca['inconclusiveRate']):>28}"
@@ -589,7 +650,9 @@ def render_table(results: Sequence[Mapping]) -> str:
 
     lines = ["watchtower experiment results"]
     lines.append(f"runs={len(cells)}")
-    lines.append(f"overall detection: {_pct(det)}   false positives (clean runs): {_pct(fpr)}")
+    lines.append(
+        f"overall detection: {_pct(det)}   false positives (clean runs): {_pct(fpr)}"
+    )
     if any(
         (r.get("evidence_fault") or r.get("evidenceFault"))
         and _fault_label(r) not in EVIDENCE_CONTROLS
@@ -603,12 +666,18 @@ def render_table(results: Sequence[Mapping]) -> str:
     lines.append("coverage: fault x verifier (fraction of faulted runs caught)")
     coverage = fault_coverage(cells)
     verifiers = sorted({v for row in coverage.values() for v in row})
-    header = f"{'fault':<18}" + "".join(f"{v:>10}" for v in verifiers) + f"{'detected':>10}"
+    header = (
+        f"{'fault':<18}" + "".join(f"{v:>10}" for v in verifiers) + f"{'detected':>10}"
+    )
     lines.append(header)
     for fault, row in sorted(coverage.items()):
         fault_runs = [r for r in cells if _positive_label(r) == fault]
         detected = sum(r["verdict"] != "PASS" for r in fault_runs) / len(fault_runs)
-        line = f"{fault:<18}" + "".join(f"{_pct(row.get(v, 0.0)):>10}" for v in verifiers) + f"{_pct(detected):>10}"
+        line = (
+            f"{fault:<18}"
+            + "".join(f"{_pct(row.get(v, 0.0)):>10}" for v in verifiers)
+            + f"{_pct(detected):>10}"
+        )
         lines.append(line)
     lines.append("")
     lines.append("overhead (per run, tokens / ms)")
@@ -630,7 +699,153 @@ def render_table(results: Sequence[Mapping]) -> str:
     kappa, n_judged = judge_vs_deterministic(cells)
     if kappa is not None:
         lines.append("")
-        lines.append(f"judge vs deterministic agreement (n={n_judged} judged runs): kappa={kappa:.2f}")
+        lines.append(
+            f"judge vs deterministic agreement (n={n_judged} judged runs): kappa={kappa:.2f}"
+        )
+    return "\n".join(lines)
+
+
+# --- CausalTrace: order-invariance and premature-pass metrics ---------------
+#
+# These metrics consume the per-cell causal artifact produced by the
+# serialization sweep. Each cell is one trace with:
+#   - causal metadata: `checksum` (canonical DAG sha), `closed` (closure
+#     marker present), `serializationVerdicts` (verdict per topological
+#     ordering), `evidenceFault` (any causal transport fault), `budget`.
+# Like the rest of the module they are pure functions: lists in, numbers
+# out.
+
+
+def _serialization_verdicts(result: Mapping) -> list[str]:
+    return list(result.get("serializationVerdicts") or [])
+
+
+def flip_rate(results: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Fraction of multi-serialization traces whose verdict differs across
+    valid topological orderings. None when no trace has >1 serialization.
+    The headline CausalTrace number: order-invariance means it is 0."""
+    cells = [r for r in results if len(_serialization_verdicts(r)) > 1]
+    if not cells:
+        return None, 0
+    flips = sum(len(set(_serialization_verdicts(r))) > 1 for r in cells)
+    return flips / len(cells), len(cells)
+
+
+def premature_pass_rate(results: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Fraction of *unclosed* traces (no closure marker) that still produced
+    at least one PASS across serializations — the "no premature PASS"
+    contract. None when no unclosed trace exists."""
+    cells = [r for r in results if not r.get("closed")]
+    if not cells:
+        return None, 0
+    premature = sum(any(v == "PASS" for v in _serialization_verdicts(r)) for r in cells)
+    return premature / len(cells), len(cells)
+
+
+def fault_recall_late(results: Sequence[Mapping]) -> dict[str, float]:
+    """Per causal evidence fault, the fraction of its traces whose verdict
+    is not PASS (the fault was caught) *when it co-occurs with late
+    arrival*. Late arrival is modeled by the sweep reordering spans across
+    valid serializations; a fault that is invisible in every order is a
+    miss. Empty dict when no causal faults present."""
+    faults = sorted({r.get("evidenceFault") for r in results if r.get("evidenceFault")})
+    out: dict[str, float] = {}
+    for fault in faults:
+        cells = [r for r in results if r.get("evidenceFault") == fault]
+        caught = sum(
+            any(v != "PASS" for v in _serialization_verdicts(r)) for r in cells
+        )
+        out[fault] = caught / len(cells)
+    return out
+
+
+def tokens_and_time_to_verdict(results: Sequence[Mapping]) -> dict[str, dict]:
+    """Per-rendering tokens and wall-clock latency. The budget field is the
+    measured tokens/duration for the (single) verification pass; the sweep
+    reports the number of serializations it had to render. Reported as
+    p50/p99 like the other overhead metrics."""
+    cells = list(results)
+    if not cells:
+        return {}
+    tokens = [float(r.get("budget", {}).get("totalTokens", 0)) for r in cells]
+    duration = [float(r.get("budget", {}).get("durationMs", 0)) for r in cells]
+    serializations = [len(_serialization_verdicts(r)) for r in cells]
+    return {
+        "tokensPerRun": {
+            "mean": sum(tokens) / len(tokens),
+            "p50": _percentile(tokens, 50),
+            "p99": _percentile(tokens, 99),
+        },
+        "durationMsPerRun": {
+            "mean": sum(duration) / len(duration),
+            "p50": _percentile(duration, 50),
+            "p99": _percentile(duration, 99),
+        },
+        "serializationsPerRun": {
+            "mean": sum(serializations) / len(serializations),
+            "p50": _percentile(serializations, 50),
+            "p99": _percentile(serializations, 99),
+        },
+    }
+
+
+def verdict_calibration(results: Sequence[Mapping]) -> dict[str, dict]:
+    """PASS / FAIL / INCONCLUSIVE distribution per (closed, evidenceFault)
+    condition over the first serialization of each trace."""
+    groups: dict[str, list[str]] = {}
+    for r in results:
+        verdicts = _serialization_verdicts(r)
+        verdict = verdicts[0] if verdicts else r.get("verdict", "NO_REPORT")
+        closed = "closed" if r.get("closed") else "unclosed"
+        fault = r.get("evidenceFault") or "clean"
+        groups.setdefault(f"{closed} x {fault}", []).append(verdict)
+    out: dict[str, dict] = {}
+    for key, verdicts in sorted(groups.items()):
+        n = len(verdicts)
+        out[key] = {
+            "runs": n,
+            "passRate": sum(v == "PASS" for v in verdicts) / n,
+            "failRate": sum(v in ("FAIL", "FLAGGED") for v in verdicts) / n,
+            "inconclusiveRate": sum(v == "INCONCLUSIVE" for v in verdicts) / n,
+        }
+    return out
+
+
+def render_causal(results: Sequence[Mapping]) -> str:
+    """The CausalTrace table: flip rate, premature-pass rate, per-fault
+    late recall, tokens/time-to-verdict, and verdict calibration."""
+    lines = ["causal order-invariance experiment"]
+    lines.append(f"traces={len(results)}")
+    flip, n_flip = flip_rate(results)
+    premature, n_prem = premature_pass_rate(results)
+    if flip is not None:
+        lines.append(
+            f"flip rate (verdict differs across serializations): {_pct(flip)}  (n={n_flip} multi-serialization traces)"
+        )
+    if premature is not None:
+        lines.append(
+            f"premature PASS on unclosed traces: {_pct(premature)}  (n={n_prem})"
+        )
+    recall = fault_recall_late(results)
+    if recall:
+        lines.append("")
+        lines.append("fault recall under late arrival (catch rate per causal fault)")
+        for fault, rate in recall.items():
+            lines.append(f"  {fault:<20} {_pct(rate)}")
+    lines.append("")
+    lines.append("tokens / time to verdict")
+    for key, stats in tokens_and_time_to_verdict(results).items():
+        lines.append(
+            f"  {key:<26} mean={stats['mean']:>10.1f} p50={stats['p50']:>10.1f} p99={stats['p99']:>10.1f}"
+        )
+    lines.append("")
+    lines.append("verdict calibration (first serialization)")
+    lines.append(f"{'condition':<34}{'runs':>6}{'PASS':>8}{'FAIL':>8}{'INCONCL':>9}")
+    for key, stats in verdict_calibration(results).items():
+        lines.append(
+            f"{key:<34}{stats['runs']:>6}"
+            f"{_pct(stats['passRate']):>8}{_pct(stats['failRate']):>8}{_pct(stats['inconclusiveRate']):>9}"
+        )
     return "\n".join(lines)
 
 
@@ -639,11 +854,40 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="analyze experiment results")
     parser.add_argument("--results", type=str, default="artifacts/results.json")
-    parser.add_argument("--compare", type=str, action="append", default=[], help="additional artifacts; pairwise judge kappa + consensus")
-    parser.add_argument("--delta", type=str, default="", help="second artifact; report per-fault detection deltas")
-    parser.add_argument("--verify", action="store_true", help="check artifact integrity (signature, protocol)")
-    parser.add_argument("--false-assurance", action="store_true", help="render the four-condition false-assurance analysis")
-    parser.add_argument("--baseline", type=str, default="", help="behavior-only artifact for the condition comparison")
+    parser.add_argument(
+        "--compare",
+        type=str,
+        action="append",
+        default=[],
+        help="additional artifacts; pairwise judge kappa + consensus",
+    )
+    parser.add_argument(
+        "--delta",
+        type=str,
+        default="",
+        help="second artifact; report per-fault detection deltas",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="check artifact integrity (signature, protocol)",
+    )
+    parser.add_argument(
+        "--false-assurance",
+        action="store_true",
+        help="render the four-condition false-assurance analysis",
+    )
+    parser.add_argument(
+        "--causal",
+        action="store_true",
+        help="render the CausalTrace order-invariance analysis",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default="",
+        help="behavior-only artifact for the condition comparison",
+    )
     args = parser.parse_args()
     artifact = load_results(args.results)
     a = artifact["cells"]
@@ -654,6 +898,8 @@ def main() -> None:
             print(render_condition_comparison(a, load_results(args.baseline)["cells"]))
         else:
             print(render_false_assurance(a, name=artifact.get("configName", "")))
+    elif args.causal:
+        print(render_causal(a))
     else:
         print(render_table(a))
     if args.compare:
