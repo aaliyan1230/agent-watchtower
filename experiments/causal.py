@@ -202,6 +202,62 @@ def renderings(spans: Sequence[Mapping]) -> dict[str, str]:
     }
 
 
+def _fact_line(span: Mapping) -> str:
+    """One compact, fully-specified span line for the LLM judge renderings:
+    id + name + parent + attributes + link targets. The ordered renderings
+    are the same facts as the canonical DAG, only arranged by arrival /
+    timestamp order, so a judge flip across them measures order-sensitivity
+    rather than missing information."""
+    attributes = _attrs(span)
+    facts = [f"{k}={attributes[k]}" for k in sorted(attributes)]
+    links = [
+        f"{l.get('spanId')}({str((l.get('attributes') or {}).get(LINK_PURPOSE, ''))})"
+        for l in _links(span)
+    ]
+    parts = [
+        str(span.get("spanId", "")),
+        str(span.get("name", "")),
+        "p=" + str(span.get("parentSpanId") or "-"),
+    ]
+    if facts:
+        parts.append(" ".join(facts))
+    if links:
+        parts.append("links=" + ",".join(sorted(links)))
+    return "\t".join(parts)
+
+
+def judge_renderings(spans: Sequence[Mapping]) -> dict[str, str]:
+    """Factual renderings consumed by the live LLM judge (causal_judge).
+
+    All three carry the *same* causal facts so that a verdict flip across
+    them is a genuine order/presentation effect, not an information gap:
+
+      - ``text``: full span facts in arrival order (today's OTLP dump);
+      - ``time_sorted``: the same facts sorted by timestamp (today's
+        arrival-coupled behavior);
+      - ``canonical``: the DAG — every node with its facts, then every
+        causal edge (parent + links) — order-invariant by construction.
+
+    This is deliberately richer than :func:`canonical_render`, which stays
+    the byte-stable Go mirror that canonical_checksum hashes.
+    """
+    text = "\n".join(_fact_line(s) for s in spans)
+    timed = "\n".join(_fact_line(s) for s in time_sorted(spans))
+    nodes, edges = build_dag(spans)
+    node_lines = [
+        f"{sid}\t{nodes[sid].get('kind', '')}\t{nodes[sid].get('name', '')}\t"
+        + _fact_line(nodes[sid]).split("\t", 2)[-1]
+        for sid in sorted(nodes)
+    ]
+    edge_lines = [f"{frm} > {to}\t{purpose}" for frm, to, purpose in edges]
+    canonical = "\n".join(node_lines + edge_lines)
+    return {
+        "text": text,
+        "time_sorted": timed,
+        "canonical": canonical,
+    }
+
+
 def deterministic_verdict(spans: Sequence[Mapping]) -> str:
     """A small purely-deterministic verdict over the *causal obligations*
     the CausalTrace verifier enforces, used to measure flip and premature

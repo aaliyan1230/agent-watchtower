@@ -4,6 +4,9 @@ import pytest
 
 from experiments.analyze import (
     behavior_by_telemetry_matrix,
+    causal_judge_agreement,
+    causal_judge_agreement_matrix,
+    causal_judge_flip_rate,
     cohen_kappa,
     condition_of,
     condition_summary,
@@ -16,9 +19,11 @@ from experiments.analyze import (
     judge_consensus,
     per_verifier_detection,
     premature_pass_rate,
+    render_causal_judge,
     render_condition_comparison,
     safe_abstention_rate,
     verdict_calibration,
+    verdict_distribution_by_rendering,
 )
 
 
@@ -250,3 +255,90 @@ def test_verdict_calibration():
     assert key in cal
     assert cal[key]["passRate"] == pytest.approx(0.5)
     assert cal[key]["inconclusiveRate"] == pytest.approx(0.5)
+
+
+def _judge_cell(trace_id, fault, renderings, usage=None):
+    return {
+        "traceId": trace_id,
+        "evidenceFault": fault,
+        "renderings": renderings,
+        "usage": usage or {},
+    }
+
+
+def test_causal_judge_flip_rate():
+    cells = [
+        _judge_cell(
+            "t1", None, {"text": "PASS", "time_sorted": "PASS", "canonical": "PASS"}
+        ),
+        _judge_cell(
+            "t2",
+            "orphan_link_target",
+            {"text": "PASS", "time_sorted": "PASS", "canonical": "FAIL"},
+        ),
+        _judge_cell(
+            "t3", "orphan_link_target", {"text": "INCONCLUSIVE", "time_sorted": "PASS"}
+        ),
+        _judge_cell("t4", None, {"text": ""}),  # uncommitted verdicts don't count
+    ]
+    rate, n = causal_judge_flip_rate(cells)
+    assert n == 3
+    assert rate == pytest.approx(2 / 3)
+    assert causal_judge_flip_rate([_judge_cell("t", None, {})]) == (None, 0)
+
+
+def test_causal_judge_agreement_keys_on_trace_and_rendering():
+    a = [
+        _judge_cell("t1", "drop_link", {"text": "PASS", "canonical": "PASS"}),
+        _judge_cell("t2", "orphan_link_target", {"text": "PASS", "canonical": "FAIL"}),
+    ]
+    b = [
+        _judge_cell("t1", "drop_link", {"text": "PASS", "canonical": "FAIL"}),
+        _judge_cell("t2", "orphan_link_target", {"text": "FAIL", "canonical": "FAIL"}),
+    ]
+    kappa, n = causal_judge_agreement(a, b)
+    assert n == 4  # 2 traces x 2 renderings
+    # sorted by (trace, rendering): a=[F,F,T,F], b=[T,F,T,T]
+    # observed agreement 2/4, kappa 0.2.
+    assert kappa == pytest.approx(0.2)
+    # No shared (trace, rendering) pairs -> None.
+    assert causal_judge_agreement(a, []) == (None, 0)
+
+
+def test_causal_judge_agreement_matrix():
+    a = [_judge_cell("t1", None, {"text": "PASS", "canonical": "PASS"})]
+    b = [_judge_cell("t1", None, {"text": "PASS", "canonical": "FAIL"})]
+    matrix, n = causal_judge_agreement_matrix([("gemini", a), ("kimi", b)])
+    assert n == 2
+    assert matrix["gemini"]["kimi"] == pytest.approx(0.0)  # 1/2 above chance -> kappa 0
+    assert "kimi" in matrix["gemini"]
+
+
+def test_verdict_distribution_by_rendering():
+    cells = [
+        _judge_cell("t1", None, {"text": "PASS", "canonical": "FAIL"}),
+        _judge_cell("t2", None, {"text": "PASS"}),
+    ]
+    dist = verdict_distribution_by_rendering(cells)
+    assert dist["text"] == {"PASS": 2, "FAIL": 0, "INCONCLUSIVE": 0}
+    assert dist["canonical"] == {"PASS": 0, "FAIL": 1, "INCONCLUSIVE": 0}
+
+
+def test_render_causal_judge_contains_flip_and_distribution():
+    cells = [
+        _judge_cell(
+            "t1",
+            "orphan_link_target",
+            {"text": "PASS", "time_sorted": "PASS", "canonical": "FAIL"},
+            usage={
+                "text": {"inputTokens": 10, "outputTokens": 2, "durationMs": 5.0},
+                "canonical": {"inputTokens": 9, "outputTokens": 1, "durationMs": 5.0},
+            },
+        )
+    ]
+    out = render_causal_judge(cells, name="gemini")
+    assert "causal judge over renderings gemini" in out
+    assert "verdict flip across renderings: 100%" in out
+    assert "canonical" in out
+    assert "in=" in out and "ms" in out
+    assert "orphan_link_target" in out

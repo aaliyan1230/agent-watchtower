@@ -1,0 +1,96 @@
+CAUSAL_METRICS -- tracked artifact footer for the CausalTrace workstream
+=======================================================================
+Protocol: causal-1  (report protocolVersion 0.12 after the UNKNOWN fold)
+Computed where: experiments.causal_run -> experiments.causal / experiments.causal_judge -> experiments.analyze
+
+Naming note
+-----------
+The abstain verdict UNKNOWN was folded into INCONCLUSIVE (commit 181be1a);
+report.go now emits exactly PASS / FLAGGED / INCONCLUSIVE / FAIL. There is
+no UNKNOWN constant. This removes a four-way branch the judge/verifier did
+not actually need and keeps "evidence missing" (abstain) distinct from
+"evidence wrong" (fail) in every table below.
+
+Grid
+----
+Offline grid: 40 distinct seeded executions (seeds 1..40 alternating the
+flash/pro trace-shape families) x 4 conditions (clean + truncate_closed,
+drop_link, orphan_link_target) = 160 cells. Every execution is a different
+causal DAG: 80/80 distinct canonical SHA-256s over the default range,
+invariant-verified by tests. Serialization bound: 20 valid topo orderings
+per trace. Budget: deterministic per-trace token/duration estimates scaled
+by DAG size (NO live spend in the offline grid).
+
+Metric definitions and current values (offline grid, results-causal.json)
+-------------------------------------------------------------------------
+
+1. flip_rate  -- fraction of multi-serialization traces whose verdict
+   differs across valid topological orderings of the same causal DAG.
+   Order-invariance claim => 0.
+   Current: 0.000 (n=160 multi-serialization traces)
+
+2. premature_pass_rate -- fraction of UNCLOSED traces (no closure marker)
+   that still produced at least one PASS across serializations. De-scope'd
+   by contract: unclosed trace is INCONCLUSIVE in every ordering.
+   Current: 0.000 (n=40 unclosed cells)
+
+3. fault_recall_late -- per causal evidence fault, fraction of its traces
+   caught (verdict != PASS) under late arrival / reordered delivery.
+   Current:
+     drop_link          0.00   <- KNOWN TRUE MISS: removing a causal link
+                                  is invisible to the dangling-target check;
+                                  see LIMITATIONS / SESSION notes.
+     orphan_link_target 1.00
+     truncate_closed    1.00
+
+4. tokens_and_time_to_verdict -- mean/p50/p99 tokens and wall-clock ms per
+   verification pass, plus serializations rendered. Live judge numbers
+   replace these once the live cells run.
+   Current (offline budgets):
+     tokensPerRun          mean 357.9  p50 354  p99 510
+     durationMsPerRun      mean 122.3  p50 121  p99 175
+     serializationsPerRun  mean  17.3  p50  20  p99  20
+
+5. verdict_calibration -- PASS/FAIL/INCONCLUSIVE distribution over the
+   first serialization, per (closed, evidenceFault) condition.
+   Current:
+     closed x clean                    PASS 100%  FAIL 0%  INCONCL 0%   (n=40)
+     closed x drop_link                PASS 100%  FAIL 0%  INCONCL 0%   (n=40)
+     closed x orphan_link_target       PASS   0%  FAIL 0%  INCONCL 100% (n=40)
+     unclosed x truncate_closed        PASS   0%  FAIL 0%  INCONCL 100% (n=40)
+
+Live judge section (results-causal-judge-*.json, keys in .env)
+--------------------------------------------------------------
+Sample: first 20 cells of the grid (seed 1..5 x 4 conditions, flash/pro
+mix). 20 traces x 3 renderings = 60 live calls per family. Prompts are
+identical in structure across the three renderings; the renderings carry
+the FULL span facts (attributes + links) so a flip means the *arrangement*
+moved the judge, not that information was missing.
+
+judge_flip_rate -- fraction of judged traces whose LLM verdict differs
+   across the three renderings (text / time_sorted / canonical) of the
+   same factual log. Order-robustness claim => 0; live judges are far
+   from it, which is the measured phenomenon.
+   Current:  gemini   0.550 (n=20)
+             deepseek 0.750 (n=20)
+             kimi     0.700 (n=20)
+   gemini leak table (fraction PASS per fault x rendering):
+             drop_link 0.20 / 0.60 / 0.40 , orphan 0 / 0 / 0 ,
+             truncate_closed 0.40 / 0.20 / 0.80  (text/time/canonical)
+
+cross-family judge kappa -- Cohen's kappa between judge families over
+   shared (trace, rendering) pairs, and each family vs the majority
+   consensus. Low kappa = the families do not agree on what the same log
+   proves. Current (n=57 shared pairs):
+             gemini vs deepseek 0.08   gemini vs kimi 0.29
+             deepseek vs kimi   0.25
+             consensus kappa: gemini 0.55, bedrock 0.44, kimi 0.66
+
+Live spend (this workstream, est. at list prices from measured tokens)
+---------------------------------------------------------------------
+   gemini-3.5-flash-lite  60 calls ~$0.0096      (26337 in / 665 out)
+   deepseek.v3.2          60 calls ~$0.0069      (23512 in / 699 out)
+   moonshotai.kimi-k2.5   60 calls ~$0.0873      (22337 in / 29554 out)
+   + earlier pilots (~36 calls) ~$0.01
+   TOTAL est. ~$0.12  -- comfortably within the strict $20-40 live cap.
+   No further live calls are planned for this workstream.

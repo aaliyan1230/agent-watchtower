@@ -7,6 +7,7 @@ from experiments.causal import (
     canonical_checksum,
     canonical_render,
     deterministic_verdict,
+    judge_renderings,
     renderings,
     sweep,
     time_sorted,
@@ -154,3 +155,25 @@ def test_sweep_no_flips_on_closed_clean_trace():
     # Every valid serialization of a closed, causally-complete trace gives
     # the same (PASS) verdict — order-invariance holds.
     assert verdicts == {"PASS"}
+
+
+def test_judge_renderings_carry_facts_in_all_forms():
+    r = judge_renderings(_closed_trace())
+    assert set(r) == {"text", "time_sorted", "canonical"}
+    # Every form exposes the closure marker, the final answer and the link.
+    for form in r.values():
+        assert "watchtower.trace.closed=true" in form
+        assert "watchtower.final=true" in form
+    assert "s2 > s3\tdata" in r["canonical"]
+    # Deterministic.
+    assert r == judge_renderings(_closed_trace())
+
+
+def test_judge_renderings_canonical_is_order_invariant():
+    normal = _closed_trace()
+    reversed_ = list(reversed(_closed_trace()))
+    assert (
+        judge_renderings(reversed_)["canonical"]
+        == judge_renderings(normal)["canonical"]
+    )
+    assert judge_renderings(normal)["text"] != judge_renderings(reversed_)["text"]

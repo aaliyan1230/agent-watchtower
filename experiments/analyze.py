@@ -849,6 +849,182 @@ def render_causal(results: Sequence[Mapping]) -> str:
     return "\n".join(lines)
 
 
+# --- CausalTrace live judge: order-sensitivity of LLM judge families ---
+#
+# The deterministic sweep proves the canonical form is order-invariant.
+# These metrics consume the causal_judge artifact (one row per trace
+# with a verdict per rendering: text / time_sorted / canonical) and
+# quantify how much the *presentation* moves a live LLM judge.
+
+
+def _judge_renderings(result: Mapping) -> dict[str, str]:
+    """Non-empty judge verdicts for one row, keyed by rendering."""
+    return {k: v for k, v in (result.get("renderings") or {}).items() if v}
+
+
+def causal_judge_flip_rate(cells: Sequence[Mapping]) -> tuple[float | None, int]:
+    """Fraction of judged traces whose LLM verdict differs across the
+    three renderings of the same log — the live-judge order-sensitivity
+    number. None when no row carries more than one judged rendering."""
+    rows = [c for c in cells if _judge_renderings(c)]
+    if not rows:
+        return None, 0
+    flips = sum(len(set(_judge_renderings(c).values())) > 1 for c in rows)
+    return flips / len(rows), len(rows)
+
+
+def causal_judge_agreement(
+    a: Sequence[Mapping], b: Sequence[Mapping]
+) -> tuple[float | None, int]:
+    """Cohen's kappa between two judge families over the same (trace,
+    rendering) pairs. Binary: PASS vs anything else. None when fewer than
+    two pairs are shared."""
+    ka = {
+        (c.get("traceId"), c.get("evidenceFault"), rk): v
+        for c in a
+        for rk, v in _judge_renderings(c).items()
+    }
+    kb = {
+        (c.get("traceId"), c.get("evidenceFault"), rk): v
+        for c in b
+        for rk, v in _judge_renderings(c).items()
+    }
+    keys = sorted(ka.keys() & kb.keys(), key=lambda t: (t[0] or "", t[1] or "", t[2]))
+    if len(keys) < 2:
+        return None, len(keys)
+    fa = [ka[k] != "PASS" for k in keys]
+    fb = [kb[k] != "PASS" for k in keys]
+    return cohen_kappa(fa, fb), len(keys)
+
+
+def causal_judge_agreement_matrix(
+    named: Sequence[tuple[str, Sequence[Mapping]]],
+) -> tuple[dict, int]:
+    """Pairwise inter-family kappa plus each family's agreement with the
+    majority consensus over the (trace, rendering) rows all families saw.
+    The 3-family judge-consistency table for the paper."""
+    names = [n for n, _ in named]
+    indexes = [
+        {
+            (c.get("traceId"), c.get("evidenceFault"), rk): v
+            for c in cells
+            for rk, v in _judge_renderings(c).items()
+        }
+        for _, cells in named
+    ]
+    common = set(indexes[0])
+    for idx in indexes[1:]:
+        common &= set(idx)
+    order = sorted(common, key=lambda t: (t[0] or "", t[1] or "", t[2]))
+    flags = {n: [indexes[i][k] != "PASS" for k in order] for i, n in enumerate(names)}
+    consensus = judge_consensus([flags[n] for n in names])
+    out: dict[str, dict[str, float]] = {
+        n: {"consensus": cohen_kappa(flags[n], consensus)} for n in names
+    }
+    for i, a in enumerate(names):
+        for j, b in enumerate(names):
+            if i < j:
+                k = cohen_kappa(flags[a], flags[b])
+                out[a][b] = k
+                out[b][a] = k
+    return out, len(order)
+
+
+def verdict_distribution_by_rendering(
+    cells: Sequence[Mapping],
+) -> dict[str, dict[str, int]]:
+    """PASS / FAIL / INCONCLUSIVE / absent counts per rendering key."""
+    out: dict[str, dict[str, int]] = {}
+    for c in cells:
+        for rk, v in _judge_renderings(c).items():
+            row = out.setdefault(rk, {"PASS": 0, "FAIL": 0, "INCONCLUSIVE": 0})
+            if v in row:
+                row[v] += 1
+            else:
+                row[""] = row.get("", 0) + 1
+    return out
+
+
+def _render_usage(rows: Sequence[Mapping], rk: str) -> tuple[int, int, float]:
+    """Mean (input, output) tokens and durationMs for one rendering."""
+    samples = [u for c in rows for u in [(c.get("usage") or {}).get(rk)] if u]
+    if not samples:
+        return 0, 0, 0.0
+    return (
+        round(sum(int(u.get("inputTokens", 0)) for u in samples) / len(samples)),
+        round(sum(int(u.get("outputTokens", 0)) for u in samples) / len(samples)),
+        round(sum(float(u.get("durationMs", 0)) for u in samples) / len(samples), 1),
+    )
+
+
+def _fault_pass_rates(
+    cells: Sequence[Mapping],
+) -> dict[str, dict[str, float]]:
+    """Per evidence fault, the PASS rate per rendering — the judge's
+    leak: a fault the canonical form reveals but the text form hides."""
+    faults = sorted(f for f in {c.get("evidenceFault") for c in cells} if f)
+    out: dict[str, dict[str, float]] = {}
+    for fault in faults:
+        rows = [c for c in cells if c.get("evidenceFault") == fault]
+        row: dict[str, float] = {}
+        for rk in ("text", "time_sorted", "canonical"):
+            seen = [c for c in rows if rk in _judge_renderings(c)]
+            row[rk] = (
+                sum(_judge_renderings(c)[rk] == "PASS" for c in seen) / len(seen)
+                if seen
+                else 0.0
+            )
+        out[fault] = row
+    return out
+
+
+def render_causal_judge(results: Sequence[Mapping], name: str = "") -> str:
+    """The live-judge CausalTrace table: flip rate across renderings,
+    verdict distribution and cost per rendering, and per-fault leaks."""
+    cells = list(results)
+    lines = [f"causal judge over renderings {name}".strip()]
+    flip, n_flip = causal_judge_flip_rate(cells)
+    if flip is not None:
+        lines.append(
+            f"verdict flip across renderings: {_pct(flip)}  (n={n_flip} judged traces)"
+        )
+    lines.append("")
+    lines.append("verdict distribution by rendering")
+    lines.append(f"{'rendering':<12}{'PASS':>7}{'FAIL':>7}{'INCONCL':>9}{'absent':>8}")
+    dist = verdict_distribution_by_rendering(cells)
+    for rk in ("text", "time_sorted", "canonical"):
+        d = dist.get(rk, {})
+        absent = (
+            sum(d.values())
+            - d.get("PASS", 0)
+            - d.get("FAIL", 0)
+            - d.get("INCONCLUSIVE", 0)
+        )
+        if absent:
+            d[""] = absent
+        lines.append(
+            f"{rk:<12}{d.get('PASS', 0):>7}{d.get('FAIL', 0):>7}"
+            f"{d.get('INCONCLUSIVE', 0):>9}{d.get('', 0):>8}"
+        )
+    lines.append("")
+    lines.append("tokens / time per rendering (mean)")
+    for rk in ("text", "time_sorted", "canonical"):
+        in_t, out_t, ms = _render_usage(cells, rk)
+        if in_t or out_t:
+            lines.append(f"  {rk:<12} in={in_t:>6} out={out_t:>6} {ms:>8.1f}ms")
+    leaks = _fault_pass_rates(cells)
+    if leaks:
+        lines.append("")
+        lines.append("judge PASS rate per fault x rendering (leak check)")
+        lines.append(f"{'fault':<20}{'text':>9}{'time':>9}{'canonical':>10}")
+        for fault, row in leaks.items():
+            lines.append(
+                f"{fault:<20}{_pct(row['text']):>9}{_pct(row['time_sorted']):>9}"
+                f"{_pct(row['canonical']):>10}"
+            )
+    return "\n".join(lines)
+
+
 def main() -> None:
     import argparse
 
@@ -883,6 +1059,11 @@ def main() -> None:
         help="render the CausalTrace order-invariance analysis",
     )
     parser.add_argument(
+        "--causal-judge",
+        action="store_true",
+        help="render the CausalTrace live-judge analysis (needs a causal_judge artifact)",
+    )
+    parser.add_argument(
         "--baseline",
         type=str,
         default="",
@@ -893,7 +1074,18 @@ def main() -> None:
     a = artifact["cells"]
     if args.verify:
         print("integrity:", verify_integrity(artifact))
-    if args.false_assurance:
+    if args.causal_judge:
+        print(render_causal_judge(a, name=artifact.get("judge", "")))
+        if args.compare:
+            named = [(artifact.get("judge", "primary"), a)]
+            for path in args.compare:
+                other = load_results(path)
+                named.append((other.get("judge", path), other["cells"]))
+            matrix, n = causal_judge_agreement_matrix(named)
+            print()
+            print(f"cross-family judge kappa ({n} shared trace x rendering pairs)")
+            print(render_agreement(matrix, n))
+    elif args.false_assurance:
         if args.baseline:
             print(render_condition_comparison(a, load_results(args.baseline)["cells"]))
         else:
@@ -902,7 +1094,7 @@ def main() -> None:
         print(render_causal(a))
     else:
         print(render_table(a))
-    if args.compare:
+    if args.compare and not args.causal_judge:
         named = [(artifact.get("judgeBackend", "primary"), a)]
         for path in args.compare:
             other = load_results(path)
