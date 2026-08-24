@@ -73,6 +73,13 @@ func spanToModel(sp *tracepb.Span) model.Span {
 			Attributes: attrsToStrings(e.Attributes),
 		})
 	}
+	for _, l := range sp.Links {
+		s.Links = append(s.Links, model.Link{
+			TraceID:    hexOrEmpty(l.TraceId, false),
+			SpanID:     hexOrEmpty(l.SpanId, false),
+			Attributes: attrsToStrings(l.Attributes),
+		})
+	}
 	return s
 }
 

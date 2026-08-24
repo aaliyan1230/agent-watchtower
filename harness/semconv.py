@@ -30,3 +30,6 @@ WATCHTOWER_TRACE_CLOSED = "watchtower.trace.closed"
 
 WATCHTOWER_CONTRACT = "watchtower.contract"
 WATCHTOWER_OUTPUT = "watchtower.output"
+
+# Link purpose: the causal role a link edge plays in a concurrent run.
+LINK_PURPOSE = "watchtower.link.purpose"

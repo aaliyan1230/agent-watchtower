@@ -31,6 +31,19 @@ type Event struct {
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
+// Link is a causal reference from this span to another span that it
+// depends on — the OTLP span-link, used as the edge carrier for
+// concurrent runs. A non-parent dependency is encoded as destination →
+// source: the link's SpanID is the cause, the carrying span is the
+// effect. Concurrent causality is what makes two valid orderings of the
+// same run equivalent, so links are reconstructed into explicit causal
+// edges (rather than a guessed order) before verification.
+type Link struct {
+	TraceID    string            `json:"traceId,omitempty"`
+	SpanID     string            `json:"spanId"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
 // Span is the unit of ingestion: one agent action (an LLM call, a tool
 // call, or an agent's lifecycle) recorded with OTel GenAI semconv
 // attributes. Attributes are flat key/value strings, matching how OTLP
@@ -47,6 +60,7 @@ type Span struct {
 	StatusMsg  string            `json:"statusMessage,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty"`
 	Events     []Event           `json:"events,omitempty"`
+	Links      []Link            `json:"links,omitempty"`
 }
 
 // Attr returns the value of an attribute, reporting whether it existed.

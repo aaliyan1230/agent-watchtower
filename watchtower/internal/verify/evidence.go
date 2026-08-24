@@ -103,6 +103,16 @@ func structuralFindings(run *graph.Run, steps map[string]graph.Step, claim *Clai
 			[]string{missing.SpanID}, missing.ParentID, steps, claim,
 		))
 	}
+	for _, missing := range run.Evidence.MissingLinkTargets {
+		value := missing.LinkID
+		if missing.Purpose != "" {
+			value = missing.LinkID + " (" + missing.Purpose + ")"
+		}
+		findings = append(findings, evidenceFinding(
+			fmt.Sprintf("span %q links to missing causal span %q", missing.SpanID, missing.LinkID),
+			[]string{missing.SpanID}, value, steps, claim,
+		))
+	}
 	return findings
 }
 
