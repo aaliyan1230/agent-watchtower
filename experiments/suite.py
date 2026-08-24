@@ -19,7 +19,7 @@ from harness.faults import EvidenceFaultKind, FaultKind
 # Frozen-protocol marker: bump when the experiment definition changes
 # (fault steps, scripts, configs) so old artifacts are never compared
 # silently against new ones.
-PROTOCOL_VERSION = "4"
+PROTOCOL_VERSION = "5"
 
 MODEL_VARIANTS = ["flash", "pro"]  # cheap tier for bulk, pro tier for a stratified sample
 SEEDS = [1, 2, 3, 4, 5]  # sized from pilot results in Phase 2

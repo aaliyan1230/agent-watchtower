@@ -65,3 +65,16 @@ def test_worker_monitor_stops_loop():
     worker = make_worker("a", [TOOL_TURN] * 5)
     worker.run("task", monitor=lambda info: "halt")
     assert worker.halted
+
+
+def test_supervisor_stamps_trace_closed_marker():
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    worker = Worker("a", "short", FakeProvider([ProviderResponse(content="fine")]), [], provider.get_tracer("t"))
+    Supervisor("sup", provider.get_tracer("t")).run("task", [worker])
+    run_span = next(s for s in exporter.get_finished_spans() if s.name == "agent.run" and s.parent is None)
+    assert run_span.attributes is not None and run_span.attributes["watchtower.trace.closed"] is True

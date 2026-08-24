@@ -53,7 +53,31 @@ func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 	if claim := claimByName(claims, "temporal_nesting"); claim != nil {
 		findings = append(findings, checkTemporalNesting(run.Steps, steps, claim)...)
 	}
+	if claim := claimByName(claims, "trace_closed"); claim != nil {
+		findings = append(findings, checkTraceClosed(run, steps, claim))
+	}
 	return compactFindings(findings)
+}
+
+// checkTraceClosed abstains when the run carries no explicit end-of-trace
+// marker: it may still be receiving causally relevant spans, and a PASS
+// now would be a false all-clear. This is the evidence-gap half of the
+// three-valued verdict — the report layer maps the finding to UNKNOWN.
+func checkTraceClosed(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
+	if run.Closed {
+		return Finding{}
+	}
+	spanIDs := []string{}
+	if run.RootSpanID != "" {
+		spanIDs = []string{run.RootSpanID}
+	}
+	return evidenceFinding(
+		"run has no trace-closure marker; causally relevant spans may still arrive",
+		spanIDs,
+		model.WatchtowerTraceClosed,
+		steps,
+		claim,
+	)
 }
 
 func claimByName(claims []Claim, name string) *Claim {

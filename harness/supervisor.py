@@ -91,6 +91,9 @@ class Supervisor:
             )
             root.set_attribute(semconv.WATCHTOWER_COMPLETED, True)
             root.set_attribute(semconv.WATCHTOWER_OUTCOME, "escalated" if result.escalation else "complete")
+            # Same contract as the worker: the supervisor run is only
+            # complete when nothing more will arrive.
+            root.set_attribute(semconv.WATCHTOWER_TRACE_CLOSED, True)
         return result
 
     def _decide(self, info: StepInfo, worker: Worker, state: _WorkerState, queue: list[Worker], idx: int, root) -> str:

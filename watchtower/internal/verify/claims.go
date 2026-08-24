@@ -116,6 +116,14 @@ func ClaimReference() []Claim {
 			},
 			Action: "replay from a clean recorded trace",
 		},
+		{
+			Name:      "trace_closed",
+			Statement: "the run carries an explicit end-of-trace marker, so no causally relevant spans may still arrive",
+			Requires: []EvidenceReq{
+				{What: model.WatchtowerTraceClosed, Provenance: ProvenanceWatchtower},
+			},
+			Action: "wait for the full export batch or recall the remaining spans",
+		},
 	}
 }
 
@@ -130,6 +138,7 @@ func (o EvidenceObligations) Claims() []Claim {
 		"final_answer":        o.RequireFinalAnswer,
 		"supervisor_decision": o.RequireSupervisorDecision,
 		"temporal_nesting":    o.RequireTemporalNesting,
+		"trace_closed":        o.RequireTraceClosed,
 	}
 	// trace_integrity rides on the structural findings and is always
 	// part of the evidence contract when evidence checking is on.
@@ -168,6 +177,7 @@ func attributeProvenance() map[string]Provenance {
 		model.WatchtowerFinal:       ProvenanceWatchtower,
 		model.WatchtowerOutcome:     ProvenanceWatchtower,
 		model.WatchtowerToolCallIDs: ProvenanceWatchtower,
+		model.WatchtowerTraceClosed: ProvenanceWatchtower,
 		model.WatchtowerContract:    ProvenanceWatchtower,
 		model.WatchtowerOutput:      ProvenanceWatchtower,
 		model.WatchtowerToolArgs:    ProvenanceWatchtower,

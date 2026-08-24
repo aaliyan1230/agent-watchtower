@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.10"
+const ProtocolVersion = "0.11"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -26,6 +26,7 @@ const (
 	VerdictFlagged      Verdict = "FLAGGED"
 	VerdictInconclusive Verdict = "INCONCLUSIVE"
 	VerdictFail         Verdict = "FAIL"
+	VerdictUnknown      Verdict = "UNKNOWN"
 )
 
 // VerifierSummary is the per-verifier account the experiments layer
@@ -81,18 +82,24 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 	r.JudgeUsage = JudgeUsage{InputTokens: input, OutputTokens: output}
 }
 
-// verdictFor maps findings to a verdict. A direct critical violation
-// fails first; an evidence gap is INCONCLUSIVE rather than a failure;
-// ordinary warnings retain the legacy FLAGGED outcome. A judge
-// critical finding fails only when no evidence gap exists: the judge
-// reads the same trace, so when the channel cannot support a claim the
-// verdict abstains regardless of the judge's opinion.
+// verdictFor maps findings to a verdict. Ordering is deliberate and
+// runs from strongest-to-weakest confidence: an observed critical
+// violation fails unless the trace was never declared closed; an
+// unclosed trace is UNKNOWN (spans may still arrive, so even a FAIL
+// seen so far cannot be trusted); a closed-but-incomplete trace
+// abstains INCONCLUSIVE; a judge critical finding fails when the
+// channel supports it; warnings flag. Only a closed, complete, clean
+// run passes — the paper's "no premature PASS" contract.
 func verdictFor(findings []verify.Finding) Verdict {
 	detCritical, judgeCritical := false, false
-	warning, evidenceGap := false, false
+	warning, evidenceGap, unclosed := false, false, false
 	for _, f := range findings {
 		if f.Kind == verify.FindingEvidenceGap {
-			evidenceGap = true
+			if f.Claim == "trace_closed" {
+				unclosed = true
+			} else {
+				evidenceGap = true
+			}
 			continue
 		}
 		if f.Severity == verify.SeverityCritical {
@@ -106,6 +113,8 @@ func verdictFor(findings []verify.Finding) Verdict {
 		warning = true
 	}
 	switch {
+	case unclosed:
+		return VerdictUnknown
 	case detCritical:
 		return VerdictFail
 	case evidenceGap:

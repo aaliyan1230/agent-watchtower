@@ -143,6 +143,9 @@ class Worker:
                 if final:
                     run_span.set_attribute(semconv.WATCHTOWER_FINAL, True)
                     run_span.set_attribute(semconv.WATCHTOWER_OUTPUT, answer)
+                # Declare the trace closed: nothing more will arrive from
+                # this agent, so a verifier may rule instead of abstaining.
+                run_span.set_attribute(semconv.WATCHTOWER_TRACE_CLOSED, True)
 
     def _stop(self, action: str) -> str:
         if action == "reroute":

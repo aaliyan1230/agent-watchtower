@@ -67,6 +67,8 @@ class EvidenceFaultExporter(SpanExporter):
             batch = self._rewrite_first_tool_id(batch)
         elif self._fault == "truncate_final":
             batch = self._truncate_final_markers(batch)
+        elif self._fault == "truncate_closed":
+            batch = self._truncate_closed_marker(batch)
         elif self._fault == "late_span":
             batch = self._move_first_child_late(batch)
         elif self._fault == "drop_attribute":
@@ -96,6 +98,18 @@ class EvidenceFaultExporter(SpanExporter):
                     del attrs[key]
                     changed = True
             if changed:
+                batch[i] = _clone_span(span, attributes=attrs)
+        return batch
+
+    @staticmethod
+    def _truncate_closed_marker(batch):
+        """Remove the trace-closure marker so the trace looks still open.
+        The three-valued verifier must then answer UNKNOWN, not PASS —
+        the premature-pass hazard made observable."""
+        for i, span in enumerate(batch):
+            attrs = dict(span.attributes)
+            if "watchtower.trace.closed" in attrs:
+                del attrs["watchtower.trace.closed"]
                 batch[i] = _clone_span(span, attributes=attrs)
         return batch
 

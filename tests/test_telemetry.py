@@ -104,3 +104,14 @@ def test_evidence_fault_exporter_changes_only_export_batch():
     late_inner = _StubExporter()
     EvidenceFaultExporter(late_inner, "late_span").export([root, child])
     assert late_inner.batches[-1][1].start_time > root.end_time
+
+
+def test_evidence_fault_exporter_truncate_closed():
+    from harness.telemetry import EvidenceFaultExporter
+
+    root = _Span("agent.run", attributes={"watchtower.completed": "true", "watchtower.trace.closed": "true"})
+    inner = _StubExporter()
+    EvidenceFaultExporter(inner, "truncate_closed").export([root])
+    exported = inner.batches[-1][0].attributes
+    assert "watchtower.trace.closed" not in exported
+    assert "watchtower.completed" in exported

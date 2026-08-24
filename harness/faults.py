@@ -56,6 +56,7 @@ class EvidenceFaultKind(Enum):
     LATE_SPAN = "late_span"  # move a child outside its parent's time window
     DROP_ATTRIBUTE = "drop_attribute"  # remove a required correlation attribute (gen_ai.system)
     SAMPLE_SPANS = "sample_spans"  # deterministic sampling: drop every other span
+    TRUNCATE_CLOSED = "truncate_closed"  # remove the trace-closure marker; run looks still open
 
 
 @dataclass

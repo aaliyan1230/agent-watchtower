@@ -47,3 +47,16 @@ def test_worker_contract_fault_deterministic():
     w = Worker("w", "emit json", faulted, [], TracerProvider().get_tracer("t"), contract="ticket")
     answer = w.run("make a ticket")
     assert '"id": "not-an-int"' in answer
+
+
+def test_worker_stamps_trace_closed_marker():
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    w = Worker("w", "you are a calculator", FakeProvider([ProviderResponse(content="3", output_tokens=3)]), TOOLS, provider.get_tracer("t"))
+    assert w.run("1+2?") == "3"
+    run_span = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
+    assert run_span.attributes is not None and run_span.attributes["watchtower.trace.closed"] is True

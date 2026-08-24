@@ -38,6 +38,7 @@ const (
 	WatchtowerFinal       = "watchtower.final"
 	WatchtowerOutcome     = "watchtower.outcome"
 	WatchtowerToolCallIDs = "watchtower.tool.call.ids"
+	WatchtowerTraceClosed = "watchtower.trace.closed" // ours: "true" once the run is confirmed complete
 
 	// Watchtower-specific: structured-output contract checking. The
 	// harness stamps the contract name it is supposed to honor and the

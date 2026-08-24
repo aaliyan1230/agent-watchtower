@@ -98,6 +98,12 @@ type Run struct {
 	Steps      []Step
 	Budget     Budget
 	Evidence   Evidence
+	// Closed reports whether the run carries an explicit end-of-trace
+	// marker. An unclosed run may still be receiving causally relevant
+	// spans, so downstream verdict mapping must treat it as UNKNOWN
+	// rather than PASS or FAIL — a premature verdict on a half-received
+	// trace is a false all-clear.
+	Closed bool
 }
 
 // ToolCalls returns just the tool steps, in run order — the loop
@@ -199,8 +205,23 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 		walk(root)
 	}
 
+	run.Closed = tracesClosed(unique)
 	run.Budget = summarize(run.Steps, roots)
 	return run, nil
+}
+
+// tracesClosed reports whether any span carries the explicit end-of-trace
+// marker. Marker placement is deliberately lenient (root or leaf): the
+// harness stamps it on the answer/supervisor span, but a producer using
+// plain OTel would put it on whatever span ends last. What matters for
+// verification is only that the trace declared itself complete.
+func tracesClosed(spans []*model.Span) bool {
+	for _, s := range spans {
+		if closed, ok := s.AttrBool(model.WatchtowerTraceClosed); ok && closed {
+			return true
+		}
+	}
+	return false
 }
 
 // stepFrom classifies a span and copies the attributes verifiers care

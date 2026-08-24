@@ -245,3 +245,28 @@ func TestReconstructSiblingOrderByTime(t *testing.T) {
 		}
 	}
 }
+
+func TestReconstructClosedMarker(t *testing.T) {
+	base := syntheticTrace()
+	run, err := Reconstruct(base)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if run.Closed {
+		t.Fatal("clean trace without a closure marker must not be closed")
+	}
+
+	stamped := syntheticTrace()
+	for i := range stamped {
+		if stamped[i].SpanID == "s5" {
+			stamped[i].Attributes = map[string]string{model.WatchtowerTraceClosed: "true"}
+		}
+	}
+	run, err = Reconstruct(stamped)
+	if err != nil {
+		t.Fatalf("Reconstruct: %v", err)
+	}
+	if !run.Closed {
+		t.Fatal("trace with a closure marker on the last span must be closed")
+	}
+}
