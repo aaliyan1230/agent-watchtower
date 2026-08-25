@@ -64,10 +64,11 @@ func TestObligationsMapToClaims(t *testing.T) {
 		RequireFinalAnswer:        true,
 		RequireSupervisorDecision: true,
 		RequireTemporalNesting:    true,
+		RequireTraceClosed:        true,
 	}
 	want := []string{
 		"run_root", "agent_completion", "model_correlation", "tool_pairing",
-		"final_answer", "supervisor_decision", "temporal_nesting", "trace_integrity",
+		"final_answer", "supervisor_decision", "temporal_nesting", "trace_integrity", "trace_closed",
 	}
 	claims := all.Claims()
 	if len(claims) != len(want) {
@@ -109,5 +110,23 @@ func TestEvidenceFindingsCarryClaimAndAction(t *testing.T) {
 	}
 	if f.Kind != FindingEvidenceGap {
 		t.Errorf("kind = %q, want evidence_gap", f.Kind)
+	}
+}
+
+func TestTraceClosedObligation(t *testing.T) {
+	unclosed := &graph.Run{RootSpanID: "s0", Steps: []graph.Step{{SpanID: "s0", Kind: graph.StepAgent, Name: "agent.run"}}}
+
+	findings := CheckEvidence(unclosed, EvidenceObligations{RequireTraceClosed: true})
+	if len(findings) != 1 {
+		t.Fatalf("unclosed run findings = %d, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Claim != "trace_closed" || f.Kind != FindingEvidenceGap || f.Action == "" {
+		t.Fatalf("closure finding = %+v", f)
+	}
+
+	closed := &graph.Run{RootSpanID: "s0", Closed: true, Steps: unclosed.Steps}
+	if findings := CheckEvidence(closed, EvidenceObligations{RequireTraceClosed: true}); len(findings) != 0 {
+		t.Fatalf("closed run findings = %+v, want none", findings)
 	}
 }

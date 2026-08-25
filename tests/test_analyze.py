@@ -4,6 +4,9 @@ import pytest
 
 from experiments.analyze import (
     behavior_by_telemetry_matrix,
+    causal_judge_agreement,
+    causal_judge_agreement_matrix,
+    causal_judge_flip_rate,
     cohen_kappa,
     condition_of,
     condition_summary,
@@ -11,10 +14,16 @@ from experiments.analyze import (
     evidence_gap_preservation,
     false_assurance_rate_2x2,
     false_positive_rate,
+    fault_recall_late,
+    flip_rate,
     judge_consensus,
     per_verifier_detection,
+    premature_pass_rate,
+    render_causal_judge,
     render_condition_comparison,
     safe_abstention_rate,
+    verdict_calibration,
+    verdict_distribution_by_rendering,
 )
 
 
@@ -23,12 +32,27 @@ def _fa_cell(behavior, telemetry, verdict):
 
 
 def test_condition_of_maps_four_cells():
-    assert condition_of(_fa_cell(None, None, "PASS")) == ("clean_behavior", "clean_telemetry")
-    assert condition_of(_fa_cell("loop", None, "FAIL")) == ("faulty_behavior", "clean_telemetry")
-    assert condition_of(_fa_cell(None, "drop_tool_result", "INCONCLUSIVE")) == ("clean_behavior", "faulty_telemetry")
-    assert condition_of(_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")) == ("faulty_behavior", "faulty_telemetry")
+    assert condition_of(_fa_cell(None, None, "PASS")) == (
+        "clean_behavior",
+        "clean_telemetry",
+    )
+    assert condition_of(_fa_cell("loop", None, "FAIL")) == (
+        "faulty_behavior",
+        "clean_telemetry",
+    )
+    assert condition_of(_fa_cell(None, "drop_tool_result", "INCONCLUSIVE")) == (
+        "clean_behavior",
+        "faulty_telemetry",
+    )
+    assert condition_of(_fa_cell("loop", "drop_tool_result", "INCONCLUSIVE")) == (
+        "faulty_behavior",
+        "faulty_telemetry",
+    )
     # reordering is a semantics-preserving control, not a fault
-    assert condition_of(_fa_cell(None, "reorder_spans", "PASS")) == ("clean_behavior", "clean_telemetry")
+    assert condition_of(_fa_cell(None, "reorder_spans", "PASS")) == (
+        "clean_behavior",
+        "clean_telemetry",
+    )
 
 
 def test_false_assurance_rates():
@@ -51,8 +75,12 @@ def test_condition_summary_rates():
     ]
     summary = condition_summary(cells)
     assert summary["clean_behavior x clean_telemetry"]["passRate"] == pytest.approx(1.0)
-    assert summary["faulty_behavior x clean_telemetry"]["failRate"] == pytest.approx(1.0)
-    assert summary["clean_behavior x faulty_telemetry"]["inconclusiveRate"] == pytest.approx(1.0)
+    assert summary["faulty_behavior x clean_telemetry"]["failRate"] == pytest.approx(
+        1.0
+    )
+    assert summary["clean_behavior x faulty_telemetry"][
+        "inconclusiveRate"
+    ] == pytest.approx(1.0)
 
 
 def test_behavior_by_telemetry_matrix_pass_rates():
@@ -167,3 +195,150 @@ def test_kappa_mismatched_lengths():
 def test_judge_consensus():
     votes = [[True, False, True], [False, True, True], [True, True, False]]
     assert judge_consensus(votes) == [True, True, True]
+
+
+def _causal_cell(serials, closed=True, fault=None):
+    return {
+        "checked": True,
+        "serializationVerdicts": list(serials),
+        "closed": closed,
+        "evidenceFault": fault,
+        "budget": {"totalTokens": 100, "durationMs": 50},
+    }
+
+
+def test_flip_rate():
+    cells = [
+        _causal_cell(["PASS", "PASS", "PASS"]),
+        _causal_cell(["PASS", "FAIL"]),  # a flip
+        _causal_cell(["INCONCLUSIVE", "INCONCLUSIVE"]),
+    ]
+    rate, n = flip_rate(cells)
+    assert n == 3
+    assert rate == pytest.approx(1 / 3)
+    # No multi-serialization traces -> None
+    assert flip_rate([_causal_cell(["PASS"])]) == (None, 0)
+
+
+def test_premature_pass_rate():
+    cells = [
+        _causal_cell(["PASS"], closed=False),  # premature PASS
+        _causal_cell(["INCONCLUSIVE"], closed=False),
+        _causal_cell(["PASS"], closed=True),
+    ]
+    rate, n = premature_pass_rate(cells)
+    assert n == 2
+    assert rate == pytest.approx(0.5)
+    assert premature_pass_rate([_causal_cell(["PASS"], closed=True)]) == (None, 0)
+
+
+def test_fault_recall_late():
+    cells = [
+        _causal_cell(["INCONCLUSIVE"], fault="orphan_link_target"),  # caught
+        _causal_cell(["PASS"], fault="orphan_link_target"),  # missed
+        _causal_cell(["PASS"], fault="truncate_closed"),  # missed
+        _causal_cell(["PASS"], fault=None),
+    ]
+    recall = fault_recall_late(cells)
+    assert recall["orphan_link_target"] == pytest.approx(0.5)
+    assert recall["truncate_closed"] == pytest.approx(0.0)
+    assert fault_recall_late([_causal_cell(["PASS"])]) == {}
+
+
+def test_verdict_calibration():
+    cells = [
+        _causal_cell(["PASS", "PASS"], fault="truncate_closed"),
+        _causal_cell(["INCONCLUSIVE"], fault="truncate_closed"),
+    ]
+    cal = verdict_calibration(cells)
+    key = "closed x truncate_closed"
+    assert key in cal
+    assert cal[key]["passRate"] == pytest.approx(0.5)
+    assert cal[key]["inconclusiveRate"] == pytest.approx(0.5)
+
+
+def _judge_cell(trace_id, fault, renderings, usage=None):
+    return {
+        "traceId": trace_id,
+        "evidenceFault": fault,
+        "renderings": renderings,
+        "usage": usage or {},
+    }
+
+
+def test_causal_judge_flip_rate():
+    cells = [
+        _judge_cell(
+            "t1", None, {"text": "PASS", "time_sorted": "PASS", "canonical": "PASS"}
+        ),
+        _judge_cell(
+            "t2",
+            "orphan_link_target",
+            {"text": "PASS", "time_sorted": "PASS", "canonical": "FAIL"},
+        ),
+        _judge_cell(
+            "t3", "orphan_link_target", {"text": "INCONCLUSIVE", "time_sorted": "PASS"}
+        ),
+        _judge_cell("t4", None, {"text": ""}),  # uncommitted verdicts don't count
+    ]
+    rate, n = causal_judge_flip_rate(cells)
+    assert n == 3
+    assert rate == pytest.approx(2 / 3)
+    assert causal_judge_flip_rate([_judge_cell("t", None, {})]) == (None, 0)
+
+
+def test_causal_judge_agreement_keys_on_trace_and_rendering():
+    a = [
+        _judge_cell("t1", "drop_link", {"text": "PASS", "canonical": "PASS"}),
+        _judge_cell("t2", "orphan_link_target", {"text": "PASS", "canonical": "FAIL"}),
+    ]
+    b = [
+        _judge_cell("t1", "drop_link", {"text": "PASS", "canonical": "FAIL"}),
+        _judge_cell("t2", "orphan_link_target", {"text": "FAIL", "canonical": "FAIL"}),
+    ]
+    kappa, n = causal_judge_agreement(a, b)
+    assert n == 4  # 2 traces x 2 renderings
+    # sorted by (trace, rendering): a=[F,F,T,F], b=[T,F,T,T]
+    # observed agreement 2/4, kappa 0.2.
+    assert kappa == pytest.approx(0.2)
+    # No shared (trace, rendering) pairs -> None.
+    assert causal_judge_agreement(a, []) == (None, 0)
+
+
+def test_causal_judge_agreement_matrix():
+    a = [_judge_cell("t1", None, {"text": "PASS", "canonical": "PASS"})]
+    b = [_judge_cell("t1", None, {"text": "PASS", "canonical": "FAIL"})]
+    matrix, n = causal_judge_agreement_matrix([("gemini", a), ("kimi", b)])
+    assert n == 2
+    assert matrix["gemini"]["kimi"] == pytest.approx(0.0)  # 1/2 above chance -> kappa 0
+    assert "kimi" in matrix["gemini"]
+
+
+def test_verdict_distribution_by_rendering():
+    cells = [
+        _judge_cell("t1", None, {"text": "PASS", "canonical": "FAIL"}),
+        _judge_cell("t2", None, {"text": "PASS"}),
+    ]
+    dist = verdict_distribution_by_rendering(cells)
+    assert dist["text"] == {"PASS": 2, "FAIL": 0, "INCONCLUSIVE": 0}
+    assert dist["canonical"] == {"PASS": 0, "FAIL": 1, "INCONCLUSIVE": 0}
+
+
+def test_render_causal_judge_contains_flip_and_distribution():
+    cells = [
+        _judge_cell(
+            "t1",
+            "orphan_link_target",
+            {"text": "PASS", "time_sorted": "PASS", "canonical": "FAIL"},
+            usage={
+                "text": {"inputTokens": 10, "outputTokens": 2, "durationMs": 5.0},
+                "canonical": {"inputTokens": 9, "outputTokens": 1, "durationMs": 5.0},
+            },
+        )
+    ]
+    out = render_causal_judge(cells, name="gemini")
+    assert "causal judge over renderings gemini" in out
+    assert "verdict flip across renderings: 100%" in out
+    assert "canonical" in out
+    assert "in=" in out and "ms" in out
+    assert "orphan_link_target" in out

@@ -20,14 +20,22 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace import Tracer, TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
-from opentelemetry.trace import set_tracer_provider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
+from opentelemetry.trace import Link, SpanContext, set_tracer_provider
 
 from .trace_artifacts import TraceRecorder
 
 # The SDK allows one global provider per process; experiments create a
 # telemetry per cell, so only the first sets it.
 _global_provider_set = False
+
+# A span id guaranteed not to appear in any exported batch, used by the
+# orphan_link_target fault to model a causally-relevant span in flight.
+_FOREIGN_SPAN_ID = 0xFEEDFACECAFEF00D
 
 
 class EvidenceFaultExporter(SpanExporter):
@@ -67,12 +75,18 @@ class EvidenceFaultExporter(SpanExporter):
             batch = self._rewrite_first_tool_id(batch)
         elif self._fault == "truncate_final":
             batch = self._truncate_final_markers(batch)
+        elif self._fault == "truncate_closed":
+            batch = self._truncate_closed_marker(batch)
         elif self._fault == "late_span":
             batch = self._move_first_child_late(batch)
         elif self._fault == "drop_attribute":
             batch = self._drop_required_attribute(batch)
         elif self._fault == "sample_spans":
             batch = [span for i, span in enumerate(batch) if i % 2 == 0]
+        elif self._fault == "drop_link":
+            batch = [self._strip_links(span) for span in batch]
+        elif self._fault == "orphan_link_target":
+            batch = self._orphan_first_link(batch)
         return self._inner.export(batch)
 
     @staticmethod
@@ -100,6 +114,18 @@ class EvidenceFaultExporter(SpanExporter):
         return batch
 
     @staticmethod
+    def _truncate_closed_marker(batch):
+        """Remove the trace-closure marker so the trace looks still open.
+        The three-valued verifier must then answer INCONCLUSIVE, not PASS —
+        the premature-pass hazard made observable."""
+        for i, span in enumerate(batch):
+            attrs = dict(span.attributes)
+            if "watchtower.trace.closed" in attrs:
+                del attrs["watchtower.trace.closed"]
+                batch[i] = _clone_span(span, attributes=attrs)
+        return batch
+
+    @staticmethod
     def _move_first_child_late(batch):
         latest_end = max((span.end_time or 0) for span in batch)
         for i, span in enumerate(batch):
@@ -119,6 +145,45 @@ class EvidenceFaultExporter(SpanExporter):
             attrs = dict(span.attributes)
             attrs.pop("gen_ai.system", None)
             batch[i] = _clone_span(span, attributes=attrs)
+            break
+        return batch
+
+    @staticmethod
+    def _strip_links(span):
+        """Remove every causal link from a span, so the run graph sees
+        no edges between sibling spans even though the worker produced
+        them. The verifier must notice the missing causal structure."""
+        if not span.links:
+            return span
+        return _clone_span(
+            span,
+            attributes=dict(span.attributes),
+            links=(),
+        )
+
+    @staticmethod
+    def _orphan_first_link(batch):
+        """Rewrite the first link's target to an id that is not in the
+        batch, modeling a causally-relevant span still in flight. The
+        reconstructed run then reports a missing link target instead of
+        an edge — exactly the premature-PASS hazard under late arrivals."""
+        for i, span in enumerate(batch):
+            if not span.links:
+                continue
+            original = span.links[0]
+            orphan = Link(
+                SpanContext(
+                    trace_id=original.context.trace_id,
+                    span_id=_FOREIGN_SPAN_ID,
+                    is_remote=True,
+                ),
+                attributes=dict(original.attributes) if original.attributes else None,
+            )
+            new_links = (orphan,) + span.links[1:]
+            imported = _clone_span(
+                span, attributes=dict(span.attributes), links=new_links
+            )
+            batch[i] = imported
             break
         return batch
 
@@ -147,7 +212,9 @@ class HarnessTelemetry:
         # An explicit `endpoint` is used verbatim as the export URL (the
         # /v1/traces suffix is only appended for the env-var default),
         # so the full path goes here.
-        exporter: SpanExporter = OTLPSpanExporter(endpoint=self._endpoint + "/v1/traces")
+        exporter: SpanExporter = OTLPSpanExporter(
+            endpoint=self._endpoint + "/v1/traces"
+        )
         if evidence_fault:
             exporter = EvidenceFaultExporter(exporter, evidence_fault)
         self._recorder: TraceRecorder | None = None
@@ -157,7 +224,9 @@ class HarnessTelemetry:
             self._recorder = TraceRecorder(exporter, trace_dir, trace_metadata)
             exporter = self._recorder
         self._exporter = exporter
-        provider = TracerProvider(resource=Resource.create({SERVICE_NAME: service_name}))
+        provider = TracerProvider(
+            resource=Resource.create({SERVICE_NAME: service_name})
+        )
         # The scheduled export must never fire mid-run: the wire
         # contract is one export request per run (force_flush below),
         # and a 5s-scheduled partial batch would split one trace into
@@ -165,7 +234,9 @@ class HarnessTelemetry:
         # could miss early spans (a natural false all-clear, observed
         # live on tau-bench). One minute is long enough for any run
         # here; only the explicit flush ships the trace.
-        self._processor = BatchSpanProcessor(self._exporter, schedule_delay_millis=60_000)
+        self._processor = BatchSpanProcessor(
+            self._exporter, schedule_delay_millis=60_000
+        )
         provider.add_span_processor(self._processor)
         if not _global_provider_set:
             set_tracer_provider(provider)
@@ -191,7 +262,9 @@ class HarnessTelemetry:
             return None
         return self._recorder.finalize(report, native_outcome=native_outcome)
 
-    def fetch_report(self, trace_id: str, retries: int = 5, delay: float = 0.1) -> dict[str, Any] | None:
+    def fetch_report(
+        self, trace_id: str, retries: int = 5, delay: float = 0.1
+    ) -> dict[str, Any] | None:
         """Fetch the verdict for a trace from the report store. The
         ingest is synchronous on the Go side, so the report should
         already exist; retries cover slow exports without hiding the
@@ -214,7 +287,7 @@ class HarnessTelemetry:
         self._processor.shutdown()
 
 
-def _clone_span(span, *, attributes=None, start_time=None, end_time=None):
+def _clone_span(span, *, attributes=None, start_time=None, end_time=None, links=None):
     """Clone an SDK span while changing only the evidence fault field.
 
     The exporter receives immutable ReadableSpan objects. Keeping the
@@ -228,7 +301,7 @@ def _clone_span(span, *, attributes=None, start_time=None, end_time=None):
         resource=span.resource,
         attributes=dict(span.attributes) if attributes is None else attributes,
         events=span.events,
-        links=span.links,
+        links=span.links if links is None else links,
         kind=span.kind,
         instrumentation_info=getattr(span, "instrumentation_info", None),
         status=span.status,

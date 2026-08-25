@@ -53,7 +53,32 @@ func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 	if claim := claimByName(claims, "temporal_nesting"); claim != nil {
 		findings = append(findings, checkTemporalNesting(run.Steps, steps, claim)...)
 	}
+	if claim := claimByName(claims, "trace_closed"); claim != nil {
+		findings = append(findings, checkTraceClosed(run, steps, claim))
+	}
 	return compactFindings(findings)
+}
+
+// checkTraceClosed abstains when the run carries no explicit end-of-trace
+// marker: it may still be receiving causally relevant spans, and a PASS
+// now would be a false all-clear. This is the evidence-gap half of the
+// three-valued verdict — the report layer maps the finding to
+// INCONCLUSIVE.
+func checkTraceClosed(run *graph.Run, steps map[string]graph.Step, claim *Claim) Finding {
+	if run.Closed {
+		return Finding{}
+	}
+	spanIDs := []string{}
+	if run.RootSpanID != "" {
+		spanIDs = []string{run.RootSpanID}
+	}
+	return evidenceFinding(
+		"run has no trace-closure marker; causally relevant spans may still arrive",
+		spanIDs,
+		model.WatchtowerTraceClosed,
+		steps,
+		claim,
+	)
 }
 
 func claimByName(claims []Claim, name string) *Claim {
@@ -77,6 +102,16 @@ func structuralFindings(run *graph.Run, steps map[string]graph.Step, claim *Clai
 		findings = append(findings, evidenceFinding(
 			fmt.Sprintf("span %q refers to missing parent %q", missing.SpanID, missing.ParentID),
 			[]string{missing.SpanID}, missing.ParentID, steps, claim,
+		))
+	}
+	for _, missing := range run.Evidence.MissingLinkTargets {
+		value := missing.LinkID
+		if missing.Purpose != "" {
+			value = missing.LinkID + " (" + missing.Purpose + ")"
+		}
+		findings = append(findings, evidenceFinding(
+			fmt.Sprintf("span %q links to missing causal span %q", missing.SpanID, missing.LinkID),
+			[]string{missing.SpanID}, value, steps, claim,
 		))
 	}
 	return findings

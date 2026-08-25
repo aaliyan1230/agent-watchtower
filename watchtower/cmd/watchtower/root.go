@@ -16,5 +16,6 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newVerifyCmd())
 	root.AddCommand(newServeCmd())
+	root.AddCommand(newCanonicalCmd())
 	return root
 }

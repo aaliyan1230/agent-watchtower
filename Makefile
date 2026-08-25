@@ -1,4 +1,4 @@
-.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-bedrock experiment-agreement diagrams
+.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-bedrock experiment-agreement experiment-causal experiment-causal-judge diagrams
 
 test: ## go test -race (core + producer) + pytest
 	cd watchtower && go test ./... -race
@@ -63,3 +63,13 @@ experiment-bedrock: ## same pilot with the Bedrock (Nova) judge (needs AWS CLI c
 
 experiment-agreement: ## inter-judge kappa across providers
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-bedrock.json --compare artifacts/results-live-kimi.json
+
+experiment-causal: ## offline CausalTrace sweep: canonical checksums, flips, premature passes
+	.venv/bin/python -m experiments.causal_run --out artifacts/results-causal.json
+	.venv/bin/python -m experiments.analyze --causal --results artifacts/results-causal.json
+
+experiment-causal-judge: ## live causal judge over renderings, across families (needs GEMINI + AWS creds in .env)
+	.venv/bin/python -m experiments.causal_judge --judge gemini --out artifacts/results-causal-judge-gemini.json
+	.venv/bin/python -m experiments.causal_judge --judge bedrock --out artifacts/results-causal-judge-deepseek.json
+	.venv/bin/python -m experiments.causal_judge --judge kimi --out artifacts/results-causal-judge-kimi.json
+	.venv/bin/python -m experiments.analyze --causal-judge --results artifacts/results-causal-judge-gemini.json --compare artifacts/results-causal-judge-deepseek.json --compare artifacts/results-causal-judge-kimi.json

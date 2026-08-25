@@ -25,7 +25,11 @@ from .providers import Provider, ProviderResponse
 # the policy verifier, so a policy fault is always detected. The id
 # must be stable: live providers reject tool results whose id does not
 # match an assistant tool call.
-DISALLOWED_TOOL = {"name": "rm", "args": {"path": "/tmp/watchtower"}, "id": "call-fault-0"}
+DISALLOWED_TOOL = {
+    "name": "rm",
+    "args": {"path": "/tmp/watchtower"},
+    "id": "call-fault-0",
+}
 LOOP_TOOL = {"name": "search", "args": {"q": "stuck-loop"}, "id": "call-fault-1"}
 CONTRACT_ID_FIELD = "id"  # the schema faults corrupt this field
 
@@ -48,14 +52,27 @@ class EvidenceFaultKind(Enum):
 
     DROP_PARENT = "drop_parent"  # remove a root span, leaving children orphaned
     DUPLICATE_SPAN = "duplicate_span"  # send one span twice
-    REORDER_SPANS = "reorder_spans"  # reverse a batch; reconstruction should tolerate it
-    DROP_CHILD = "drop_child"  # remove a worker lifecycle span, leaving its children orphaned
+    REORDER_SPANS = (
+        "reorder_spans"  # reverse a batch; reconstruction should tolerate it
+    )
+    DROP_CHILD = (
+        "drop_child"  # remove a worker lifecycle span, leaving its children orphaned
+    )
     DROP_TOOL_RESULT = "drop_tool_result"  # remove tool result spans while calls remain
     MISMATCH_TOOL_ID = "mismatch_tool_id"  # replace a result id with an unpaired id
     TRUNCATE_FINAL = "truncate_final"  # remove the final-answer evidence markers
     LATE_SPAN = "late_span"  # move a child outside its parent's time window
-    DROP_ATTRIBUTE = "drop_attribute"  # remove a required correlation attribute (gen_ai.system)
+    DROP_ATTRIBUTE = (
+        "drop_attribute"  # remove a required correlation attribute (gen_ai.system)
+    )
     SAMPLE_SPANS = "sample_spans"  # deterministic sampling: drop every other span
+    TRUNCATE_CLOSED = (
+        "truncate_closed"  # remove the trace-closure marker; run looks still open
+    )
+    DROP_LINK = "drop_link"  # remove causal links, so no edges between siblings
+    ORPHAN_LINK_TARGET = (
+        "orphan_link_target"  # point a link at a span that is not in the batch
+    )
 
 
 @dataclass
@@ -84,8 +101,12 @@ class FaultInjector:
     def name(self) -> str:
         return self._provider.name
 
-    def chat(self, messages, tools=None, *, contract=None, temperature=0.0) -> ProviderResponse:
-        resp = self._provider.chat(messages, tools=tools, contract=contract, temperature=temperature)
+    def chat(
+        self, messages, tools=None, *, contract=None, temperature=0.0
+    ) -> ProviderResponse:
+        resp = self._provider.chat(
+            messages, tools=tools, contract=contract, temperature=temperature
+        )
         turn = self._turns
         self._turns += 1
         if self._spec is None:
@@ -136,7 +157,10 @@ def _sync_assistant(resp: ProviderResponse) -> None:
         entry = {
             "id": tc.get("id", ""),
             "type": "function",
-            "function": {"name": tc["name"], "arguments": json.dumps(tc.get("args", {}))},
+            "function": {
+                "name": tc["name"],
+                "arguments": json.dumps(tc.get("args", {})),
+            },
         }
         if orig and "extra_content" in orig:
             entry["extra_content"] = orig["extra_content"]
