@@ -29,17 +29,19 @@ from benchmarks.taubench import env
 
 from harness.env import get_api_key
 from harness.faults import FaultInjector, FaultKind, FaultSpec
-from harness.providers import GeminiProvider
+from harness.providers import OpenRouterProvider
 from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
+from .run import judge_server_env
+
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
 CONFIG = str(REPO_ROOT / "watchtower" / "testdata" / "taubench_config.json")
 TASKS_PATH = REPO_ROOT / "benchmarks" / "taubench" / "tasks_subset.json"
-WORKER_MODEL = "gemini-3.5-flash-lite"
+WORKER_MODEL = "google/gemini-3.5-flash-lite"
 
 ALLOWED = [
     "find_user_id_by_name_zip",
@@ -85,7 +87,7 @@ def harness_tools(data: dict[str, Any]) -> list[Tool]:
 
 def run_task(idx: int, task: env.Task, condition: str, seed: int, trace_dir: str | None) -> dict[str, Any]:
     data = env.load_data()
-    provider = GeminiProvider(model=WORKER_MODEL, api_key=get_api_key("GEMINI_API_KEY") or "")
+    provider = OpenRouterProvider(model=WORKER_MODEL)
     if condition == "policy_violation":
         provider = FaultInjector(provider, FaultSpec(FaultKind.POLICY_VIOLATION, seed=seed, step=0))
     telemetry = HarnessTelemetry(
@@ -190,15 +192,15 @@ def main() -> None:
     parser.add_argument("--trace-dir", type=Path, default=None, help="record durable trace artifacts")
     args = parser.parse_args()
 
-    if not get_api_key("GEMINI_API_KEY"):
-        raise SystemExit("tau-bench pilot needs GEMINI_API_KEY in .env")
+    if not get_api_key("OPENROUTER_API_KEY"):
+        raise SystemExit("tau-bench pilot needs OPENROUTER_API_KEY in .env")
 
     tasks = env.load_tasks(TASKS_PATH, limit=args.limit)
     if args.tasks:
         wanted = {int(x) for x in args.tasks.split(",") if x.strip()}
         tasks = [t for i, t in enumerate(tasks) if i in wanted]
     conditions = [c for c in args.conditions.split(",") if c.strip()]
-    env_proc = spawn_server(ENDPOINT, ADDR, CONFIG, env={"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY") or ""})
+    env_proc = spawn_server(ENDPOINT, ADDR, CONFIG, env=judge_server_env(CONFIG))
     try:
         cells: list[dict[str, Any]] = []
         for idx, task in enumerate(tasks):

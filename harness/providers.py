@@ -3,9 +3,10 @@
 One interface, config-driven model per slot (worker / supervisor /
 judge). FakeProvider keeps the harness runnable offline and
 deterministic — the experiment needs seeded reproducibility before it
-ever talks to a real model. GeminiProvider is the real client: keys via
-the environment (harness/env.py), base URL overridable so tests can
-point it at a mock server.
+ever talks to a real model. ChatCompletionsProvider is the real client
+for any OpenAI-compatible endpoint (OpenRouter for live runs, Gemini
+direct as an alternative): keys via the environment (harness/env.py),
+base URL overridable so tests can point it at a mock server.
 """
 
 from __future__ import annotations
@@ -89,26 +90,28 @@ class FakeProvider(Provider):
         return resp
 
 
-class GeminiProvider(Provider):
-    """Gemini via its OpenAI-compatible endpoint. Retries transient
+class ChatCompletionsProvider(Provider):
+    """Any OpenAI-compatible /chat/completions endpoint. Retries transient
     failures once; the caller still sees errors for anything worse."""
 
-    name = "gemini"
-    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+    name = "openai-compatible"
+    DEFAULT_BASE_URL = ""
+    DEFAULT_MODEL = ""
+    KEY_ENV = ""
 
     def __init__(
         self,
-        model: str = "gemini-3.5-flash-lite",  # best $/perf for agentic bulk; see .env.example
+        model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         client: httpx.Client | None = None,
     ):
-        self.model = model
+        self.model = model or self.DEFAULT_MODEL
         # None means "read from env"; an explicit empty string means
         # "there is no key" and must not fall through to the env value.
-        self._api_key = api_key if api_key is not None else get_api_key("GEMINI_API_KEY")
+        self._api_key = api_key if api_key is not None else get_api_key(self.KEY_ENV)
         if not self._api_key:
-            raise ValueError("GEMINI_API_KEY is missing: add it to .env")
+            raise ValueError(f"{self.KEY_ENV} is missing: add it to .env")
         self._base = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self._client = client or httpx.Client(timeout=60.0)
 
@@ -127,6 +130,12 @@ class GeminiProvider(Provider):
                 return self._complete(payload)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in (429, 500, 502, 503) or attempt == 1:
+                    raise
+                time.sleep(1)
+            except httpx.TransportError:
+                # Routers drop long streamed responses mid-body; that is
+                # as transient as a 503.
+                if attempt == 1:
                     raise
                 time.sleep(1)
 
@@ -162,6 +171,23 @@ class GeminiProvider(Provider):
             output_tokens=usage.get("completion_tokens", 0),
             assistant_message=msg,
         )
+
+
+class GeminiProvider(ChatCompletionsProvider):
+    name = "gemini"
+    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+    DEFAULT_MODEL = "gemini-3.5-flash-lite"  # best $/perf for agentic bulk; see .env.example
+    KEY_ENV = "GEMINI_API_KEY"
+
+
+class OpenRouterProvider(ChatCompletionsProvider):
+    """One key for every model family the experiments use (Gemini workers
+    and judges, DeepSeek, Kimi); model ids carry the vendor prefix."""
+
+    name = "openrouter"
+    DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+    DEFAULT_MODEL = "google/gemini-3.5-flash-lite"
+    KEY_ENV = "OPENROUTER_API_KEY"
 
 
 def tool_schema(name: str, description: str, args: dict[str, Any]) -> dict[str, Any]:

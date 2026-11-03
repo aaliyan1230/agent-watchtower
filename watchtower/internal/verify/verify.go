@@ -60,7 +60,7 @@ type Finding struct {
 // verify only carries the config.
 type JudgeConfig struct {
 	Enabled bool   `json:"enabled"`
-	Backend string `json:"backend"` // "" or "gemini" = OpenAI-compatible, "bedrock" = Amazon Bedrock
+	Backend string `json:"backend"` // "" or "gemini" = Gemini direct, "openrouter" = OpenRouter, "bedrock" = Amazon Bedrock
 	Model   string `json:"model"`   // empty = provider default
 	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
 }

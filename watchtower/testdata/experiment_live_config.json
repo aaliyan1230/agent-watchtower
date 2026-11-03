@@ -25,5 +25,5 @@
       "requireTraceClosed": true
     }
   },
-  "judge": { "enabled": true, "model": "gemini-3.6-flash" }
+  "judge": { "enabled": true, "backend": "openrouter", "model": "google/gemini-3.6-flash" }
 }
