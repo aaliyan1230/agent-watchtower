@@ -27,15 +27,11 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import Link, SpanContext, set_tracer_provider
 
-from .trace_artifacts import TraceRecorder
+from .trace_artifacts import FOREIGN_SPAN_ID, TraceRecorder
 
 # The SDK allows one global provider per process; experiments create a
 # telemetry per cell, so only the first sets it.
 _global_provider_set = False
-
-# A span id guaranteed not to appear in any exported batch, used by the
-# orphan_link_target fault to model a causally-relevant span in flight.
-_FOREIGN_SPAN_ID = 0xFEEDFACECAFEF00D
 
 
 class EvidenceFaultExporter(SpanExporter):
@@ -174,7 +170,7 @@ class EvidenceFaultExporter(SpanExporter):
             orphan = Link(
                 SpanContext(
                     trace_id=original.context.trace_id,
-                    span_id=_FOREIGN_SPAN_ID,
+                    span_id=int(FOREIGN_SPAN_ID, 16),
                     is_remote=True,
                 ),
                 attributes=dict(original.attributes) if original.attributes else None,
