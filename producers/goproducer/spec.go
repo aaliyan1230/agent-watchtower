@@ -21,6 +21,7 @@ const (
 	agentName          = "agent.name"
 	agentStep          = "agent.step"
 	wtCompleted        = "watchtower.completed"
+	wtTraceClosed      = "watchtower.trace.closed"
 	wtFinal            = "watchtower.final"
 	wtOutput           = "watchtower.output"
 	wtContract         = "watchtower.contract"
@@ -45,7 +46,7 @@ type eventSpec struct {
 // structurally identical — only the required evidence differs.
 func buildSpec(variant string) (*spanSpec, bool) {
 	switch variant {
-	case "clean", "omit-genai-system", "omit-tool-result", "omit-tool-id", "omit-final":
+	case "clean", "omit-genai-system", "omit-tool-result", "omit-tool-id", "omit-final", "omit-closed":
 		return buildRun(variant), true
 	default:
 		return nil, false
@@ -65,6 +66,9 @@ func buildRun(variant string) *spanSpec {
 	if variant != "omit-final" {
 		root.Attrs[wtFinal] = true
 		root.Attrs[wtOutput] = answer
+	}
+	if variant != "omit-closed" {
+		root.Attrs[wtTraceClosed] = true
 	}
 
 	toolTurn := &spanSpec{

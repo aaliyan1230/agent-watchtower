@@ -22,7 +22,7 @@ func TestCleanSpecCarriesFullContract(t *testing.T) {
 		t.Fatal("clean variant must be known")
 	}
 	root := run.Attrs
-	for _, attr := range []string{agentName, wtCompleted, wtFinal, wtOutput} {
+	for _, attr := range []string{agentName, wtCompleted, wtFinal, wtOutput, wtTraceClosed} {
 		if _, present := root[attr]; !present {
 			t.Errorf("root span missing %s", attr)
 		}
@@ -54,6 +54,7 @@ func TestVariantsOmitExactlyOneRequiredField(t *testing.T) {
 		{"omit-tool-result", "tool.call", toolResultOK},
 		{"omit-tool-id", "tool.call", toolCallID},
 		{"omit-final", "chat", wtFinal},
+		{"omit-closed", "agent.run", wtTraceClosed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.variant, func(t *testing.T) {

@@ -21,7 +21,8 @@
       "requireToolResults": true,
       "requireFinalAnswer": true,
       "requireSupervisorDecision": true,
-      "requireTemporalNesting": true
+      "requireTemporalNesting": true,
+      "requireTraceClosed": true
     }
   }
 }
