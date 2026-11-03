@@ -38,6 +38,9 @@ type FindingKind string
 const (
 	FindingViolation   FindingKind = "violation"
 	FindingEvidenceGap FindingKind = "evidence_gap"
+	// FindingJudgeError marks a judge outage, so analysis never counts a
+	// timeout or transport error as the judge's opinion of the run.
+	FindingJudgeError FindingKind = "judge_error"
 )
 
 // Finding is one verifier observation with evidence: the exact span IDs
@@ -124,6 +127,7 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 		if js, err := cfg.Judge.Run(run); err != nil {
 			out = append(out, Finding{
 				Verifier: cfg.Judge.Name(),
+				Kind:     FindingJudgeError,
 				Severity: SeverityWarning,
 				Message:  "judge failed: " + err.Error(),
 			})

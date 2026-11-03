@@ -209,7 +209,10 @@ class HarnessTelemetry:
         # /v1/traces suffix is only appended for the env-var default),
         # so the full path goes here.
         exporter: SpanExporter = OTLPSpanExporter(
-            endpoint=self._endpoint + "/v1/traces"
+            endpoint=self._endpoint + "/v1/traces",
+            # The server verifies, LLM judge included, before answering the
+            # export; the SDK's 10s default drops runs under slow judges.
+            timeout=300,
         )
         if evidence_fault:
             exporter = EvidenceFaultExporter(exporter, evidence_fault)
