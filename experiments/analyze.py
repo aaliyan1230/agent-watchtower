@@ -352,6 +352,11 @@ MODEL_PRICES = {
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "deepseek.v3.2": (0.28, 0.42),
     "moonshotai.kimi-k2.5": (0.60, 2.50),
+    # OpenRouter ids (Nov 2026 list prices)
+    "google/gemini-3.6-flash": (0.75, 3.75),
+    "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "deepseek/deepseek-v3.2": (0.26, 0.38),
+    "moonshotai/kimi-k2.5": (0.50, 2.50),
 }
 
 

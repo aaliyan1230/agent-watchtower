@@ -29,6 +29,20 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 			model = "gemini-3.6-flash"
 		}
 		return judge.New(model, key, cfg.JudgeCfg.BaseURL), nil
+	case "openrouter":
+		key := os.Getenv("OPENROUTER_API_KEY")
+		if key == "" {
+			return nil, errors.New("judge enabled but OPENROUTER_API_KEY is not set (add it to .env)")
+		}
+		model := cfg.JudgeCfg.Model
+		if model == "" {
+			model = "google/gemini-3.6-flash"
+		}
+		baseURL := cfg.JudgeCfg.BaseURL
+		if baseURL == "" {
+			baseURL = "https://openrouter.ai/api/v1"
+		}
+		return judge.New(model, key, baseURL), nil
 	case "bedrock":
 		creds, err := bedrock.CredentialsFromEnv()
 		if err != nil {

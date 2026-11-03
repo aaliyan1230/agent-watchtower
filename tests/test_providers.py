@@ -1,10 +1,11 @@
-"""GeminiProvider against a mock transport: request shape, response
-parsing, error handling — no live network involved."""
+"""OpenAI-compatible providers (Gemini direct, OpenRouter) against a mock
+transport: request shape, response parsing, error handling — no live
+network involved."""
 
 import httpx
 import pytest
 
-from harness.providers import GeminiProvider, ProviderResponse
+from harness.providers import GeminiProvider, OpenRouterProvider, ProviderResponse
 
 
 def make_provider(handler) -> GeminiProvider:
@@ -96,3 +97,38 @@ def test_retry_succeeds_on_second_attempt():
     resp = make_provider(handler).chat([{"role": "user", "content": "x"}])
     assert resp.content == "ok"
     assert calls["n"] == 2
+
+
+def test_openrouter_provider_defaults(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+    p = OpenRouterProvider(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    resp = p.chat([{"role": "user", "content": "hi"}])
+    assert seen == {"url": "https://openrouter.ai/api/v1/chat/completions", "auth": "Bearer or-key"}
+    assert p.model == "google/gemini-3.5-flash-lite"
+    assert resp.system == "openrouter"
+
+
+def test_openrouter_missing_key_names_its_variable(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        OpenRouterProvider()
+
+
+def test_transport_error_retried_once():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("peer closed connection", request=request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+    resp = make_provider(handler).chat([{"role": "user", "content": "hi"}])
+    assert resp.content == "ok" and calls["n"] == 2

@@ -4,7 +4,7 @@ Emits OTel GenAI spans describing agent runs; the Go service ingests,
 reconstructs, verifies, and returns an evidence-backed verdict.
 """
 
-from .providers import FakeProvider, GeminiProvider, Provider, ProviderResponse
+from .providers import FakeProvider, GeminiProvider, OpenRouterProvider, Provider, ProviderResponse
 from .faults import EvidenceFaultKind, FaultInjector, FaultKind, FaultSpec
 from .telemetry import EvidenceFaultExporter, HarnessTelemetry
 from .workers import Tool, Worker
@@ -13,6 +13,7 @@ from .supervisor import Supervisor
 __all__ = [
     "FakeProvider",
     "GeminiProvider",
+    "OpenRouterProvider",
     "Provider",
     "ProviderResponse",
     "FaultInjector",
