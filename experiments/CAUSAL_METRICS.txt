@@ -1,6 +1,7 @@
 CAUSAL_METRICS -- tracked artifact footer for the CausalTrace workstream
 =======================================================================
-Protocol: causal-1  (report protocolVersion 0.12 after the UNKNOWN fold)
+Protocol: causal-1  (report protocolVersion 0.13: root-only closure,
+          causal_links obligation)
 Computed where: experiments.causal_run -> experiments.causal / experiments.causal_judge -> experiments.analyze
 
 Naming note
@@ -10,6 +11,27 @@ report.go now emits exactly PASS / FLAGGED / INCONCLUSIVE / FAIL. There is
 no UNKNOWN constant. This removes a four-way branch the judge/verifier did
 not actually need and keeps "evidence missing" (abstain) distinct from
 "evidence wrong" (fail) in every table below.
+
+Provenance caveats (audit, 3 Nov 2026)
+--------------------------------------
+- Metrics 1-3 and 5 come from experiments.causal.deterministic_verdict, a
+  Python reference that checks closure and dangling ids by set membership.
+  That function cannot depend on span order, so flip_rate = 0 holds by
+  construction; it is a consistency check of the sweep, not evidence that
+  the Go pipeline is order-invariant. The Go canonical package is not yet
+  wired into verify, and the grid traces are synthetic, not harness runs.
+- The reference diverges from Go on two cases: a closed trace with no
+  final answer is FAIL here but INCONCLUSIVE (final_answer evidence gap)
+  in Go; and drop_link (below) is a miss here but INCONCLUSIVE in Go,
+  where the causal_links obligation requires a link per consumed tool
+  result. Both now take closure only from a root span.
+- Metric 4 is a deterministic estimate scaled by DAG size, not a measured
+  token count or wall-clock time.
+- The live judge section below was re-run on 3 Nov 2026 over the full
+  160-cell grid through OpenRouter (real models, no mocks). Artifacts:
+  artifacts/results-causal-judge-{gemini,deepseek}.json, both pinned to
+  source checksum 9e423993... of results-causal.json. The earlier n=20
+  numbers had no artifact and are retired.
 
 Grid
 ----
@@ -37,9 +59,14 @@ Metric definitions and current values (offline grid, results-causal.json)
 3. fault_recall_late -- per causal evidence fault, fraction of its traces
    caught (verdict != PASS) under late arrival / reordered delivery.
    Current:
-     drop_link          0.00   <- KNOWN TRUE MISS: removing a causal link
-                                  is invisible to the dangling-target check;
-                                  see LIMITATIONS / SESSION notes.
+     drop_link          0.00   <- miss BY CONSTRUCTION on this grid: the
+                                  synthetic cross-branch dependency is
+                                  declared only by the link, so removing it
+                                  leaves a valid trace with nothing to
+                                  contradict. In the Go pipeline the
+                                  causal_links obligation catches it on
+                                  harness runs (evidence matrix: 100%
+                                  INCONCLUSIVE).
      orphan_link_target 1.00
      truncate_closed    1.00
 
@@ -59,38 +86,47 @@ Metric definitions and current values (offline grid, results-causal.json)
      closed x orphan_link_target       PASS   0%  FAIL 0%  INCONCL 100% (n=40)
      unclosed x truncate_closed        PASS   0%  FAIL 0%  INCONCL 100% (n=40)
 
-Live judge section (results-causal-judge-*.json, keys in .env)
---------------------------------------------------------------
-Sample: first 20 cells of the grid (seed 1..5 x 4 conditions, flash/pro
-mix). 20 traces x 3 renderings = 60 live calls per family. Prompts are
-identical in structure across the three renderings; the renderings carry
-the FULL span facts (attributes + links) so a flip means the *arrangement*
-moved the judge, not that information was missing.
+Live judge section (results-causal-judge-*.json, OPENROUTER_API_KEY in .env)
+-----------------------------------------------------------------------------
+Sample: the full grid, 160 traces x 3 renderings = 480 live calls per
+family, all through OpenRouter. Prompts are identical in structure
+across the three renderings; the renderings carry the FULL span facts
+(attributes + links) so a flip means the *arrangement* moved the judge,
+not that information was missing.
 
 judge_flip_rate -- fraction of judged traces whose LLM verdict differs
    across the three renderings (text / time_sorted / canonical) of the
    same factual log. Order-robustness claim => 0; live judges are far
    from it, which is the measured phenomenon.
-   Current:  gemini   0.550 (n=20)
-             deepseek 0.750 (n=20)
-             kimi     0.700 (n=20)
-   gemini leak table (fraction PASS per fault x rendering):
-             drop_link 0.20 / 0.60 / 0.40 , orphan 0 / 0 / 0 ,
-             truncate_closed 0.40 / 0.20 / 0.80  (text/time/canonical)
+   Current:  gemini   (google/gemini-3.5-flash-lite)  0.48 (n=160)
+             deepseek (deepseek/deepseek-v3.2)        0.65 (n=160)
+             kimi     (moonshotai/kimi-k2.5)          not measured: with default
+                      reasoning it spent ~40s and ~4.5k reasoning tokens per
+                      call, so the full grid was cancelled. The next model
+                      refresh sets judge reasoning explicitly.
 
-cross-family judge kappa -- Cohen's kappa between judge families over
-   shared (trace, rendering) pairs, and each family vs the majority
-   consensus. Low kappa = the families do not agree on what the same log
-   proves. Current (n=57 shared pairs):
-             gemini vs deepseek 0.08   gemini vs kimi 0.29
-             deepseek vs kimi   0.25
-             consensus kappa: gemini 0.55, bedrock 0.44, kimi 0.66
+   PASS counts per rendering (text / time_sorted / canonical, of 160):
+             gemini   42 / 43 / 80
+             deepseek  2 /  1 / 36
+   The canonical DAG rendering roughly doubles PASS for both families:
+   presentation alone moves the verdict.
 
-Live spend (this workstream, est. at list prices from measured tokens)
----------------------------------------------------------------------
-   gemini-3.5-flash-lite  60 calls ~$0.0096      (26337 in / 665 out)
-   deepseek.v3.2          60 calls ~$0.0069      (23512 in / 699 out)
-   moonshotai.kimi-k2.5   60 calls ~$0.0873      (22337 in / 29554 out)
-   + earlier pilots (~36 calls) ~$0.01
-   TOTAL est. ~$0.12  -- comfortably within the strict $20-40 live cap.
-   No further live calls are planned for this workstream.
+   leak table (fraction PASS per fault x rendering, text/time/canonical):
+             gemini   drop_link 0.57/0.38/0.55  orphan 0/0/0
+                      truncate_closed 0.28/0.35/0.78
+             deepseek drop_link 0.05/0/0.35     orphan 0/0/0.10
+                      truncate_closed 0/0/0.28
+   truncate_closed (an unclosed trace) should never PASS; the canonical
+   rendering leaks it most for both families.
+
+cross-family judge kappa -- Cohen's kappa (PASS vs not) over shared
+   (trace, rendering) pairs. Current (n=480 shared pairs):
+             gemini vs deepseek 0.14
+   The 3-family matrix waits on the model refresh.
+
+Live spend (measured tokens x OpenRouter list prices)
+-----------------------------------------------------
+   google/gemini-3.5-flash-lite  480 calls ~$0.075  (206951 in / 5308 out)
+   deepseek/deepseek-v3.2        480 calls ~$0.050  (185071 in / 5207 out)
+   All live work in this round (pilots + causal judge) stays well under
+   the $15 cap.

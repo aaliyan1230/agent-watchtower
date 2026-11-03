@@ -56,7 +56,47 @@ func CheckEvidence(run *graph.Run, obligations EvidenceObligations) []Finding {
 	if claim := claimByName(claims, "trace_closed"); claim != nil {
 		findings = append(findings, checkTraceClosed(run, steps, claim))
 	}
+	if claim := claimByName(claims, "causal_links"); claim != nil {
+		findings = append(findings, checkCausalLinks(run, steps, claim)...)
+	}
 	return compactFindings(findings)
+}
+
+// checkCausalLinks abstains when a tool result was evidently consumed —
+// a later LLM turn of the same agent started after the tool finished —
+// but no span link records the dependency. Without the link, sibling
+// spans carry no causal order, so order-invariant verification cannot
+// tell that the reasoning saw the observation. Producers differ on
+// whether a tool span is a child of the turn that requested it or a
+// sibling of it; the agent scope covers both.
+func checkCausalLinks(run *graph.Run, steps map[string]graph.Step, claim *Claim) []Finding {
+	linked := make(map[string]bool, len(run.CausalEdges))
+	for _, edge := range run.CausalEdges {
+		if steps[edge.To].Kind == graph.StepLLM {
+			linked[edge.From] = true
+		}
+	}
+	var findings []Finding
+	for _, tool := range run.Steps {
+		if tool.Kind != graph.StepTool || linked[tool.SpanID] {
+			continue
+		}
+		scope := tool.ParentID
+		if parent, ok := steps[scope]; ok && parent.Kind == graph.StepLLM {
+			scope = parent.ParentID
+		}
+		for _, turn := range run.Steps {
+			if turn.Kind != graph.StepLLM || turn.ParentID != scope || turn.StartTime.Before(tool.EndTime) {
+				continue
+			}
+			findings = append(findings, evidenceFinding(
+				fmt.Sprintf("LLM span %q follows tool span %q but carries no link recording that it consumed the result", turn.SpanID, tool.SpanID),
+				[]string{turn.SpanID, tool.SpanID}, "span.link", steps, claim,
+			))
+			break
+		}
+	}
+	return findings
 }
 
 // checkTraceClosed abstains when the run carries no explicit end-of-trace

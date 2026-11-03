@@ -251,3 +251,19 @@ def test_judge_agreement_matrix_with_consensus():
     assert matrix["b"]["consensus"] == pytest.approx(1.0)
     # c = [T, F, T] vs [T, T, F]: po=1/3, p1(c)=2/3, p2=2/3 -> pe=4/9+1/9=5/9
     assert matrix["c"]["consensus"] == pytest.approx((1/3 - 5/9) / (1 - 5/9))
+
+
+def test_judge_errors_are_not_judge_opinions():
+    from experiments.analyze import fault_coverage, judge_error_count, judge_vs_deterministic
+
+    outage = {"verifier": "judge", "kind": "judge_error", "severity": 0, "message": "judge failed: timeout"}
+    opinion = {"verifier": "judge", "severity": 1, "message": "no final answer"}
+    results = [
+        {"fault": None, "seed": 1, "model": "m", "run": 1, "judged": True, "verdict": "FLAGGED", "findings": [outage]},
+        {"fault": "loop", "seed": 1, "model": "m", "run": 1, "judged": True, "verdict": "FLAGGED",
+         "findings": [{"verifier": "loop", "severity": 0}, opinion]},
+    ]
+    assert judge_error_count(results) == 1
+    assert fault_coverage(results)["loop"]["judge"] == 1.0
+    kappa, n = judge_vs_deterministic(results)
+    assert n == 2 and kappa == 1.0  # the outage counts as "judge silent", matching the clean deterministic opinion

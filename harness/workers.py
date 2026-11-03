@@ -88,7 +88,7 @@ class Worker:
         self.agent_id = agent_id
         self.halted = False
         self.rerouted = False
-        self._last_tool_ctx = None
+        self._pending_tool_ctxs: list = []
 
     def run(
         self,
@@ -181,16 +181,16 @@ class Worker:
         return "(halted by supervisor)"
 
     def _data_dependency_links(self) -> list[Link] | None:
-        """Return a link from the next chat turn to the tool span whose
-        result it consumes, if one ran in the previous turn. A worker
-        observing a tool result and then reasoning about it is a real
-        causal dependency that sibling spans under the same agent.run
-        parent cannot express — that edge is what order-invariant
-        verification needs."""
-        ctx = getattr(self, "_last_tool_ctx", None)
-        if ctx is None:
+        """Return links from the next chat turn to every tool span whose
+        result it consumes. A worker observing a tool result and then
+        reasoning about it is a real causal dependency that sibling spans
+        under the same agent.run parent cannot express — that edge is what
+        order-invariant verification needs, and the causal_links claim
+        requires one per consumed result."""
+        ctxs, self._pending_tool_ctxs = self._pending_tool_ctxs, []
+        if not ctxs:
             return None
-        return [Link(ctx, attributes={semconv.LINK_PURPOSE: "data"})]
+        return [Link(ctx, attributes={semconv.LINK_PURPOSE: "data"}) for ctx in ctxs]
 
     def _turn(self, messages, tool_schemas, step: int) -> ProviderResponse:
         links = self._data_dependency_links()
@@ -257,7 +257,7 @@ class Worker:
             # same agent.run parent carry no ordering, and links exist
             # exactly to record that an observation happened before the
             # reasoning it informed.
-            self._last_tool_ctx = tool_span.get_span_context()
+            self._pending_tool_ctxs.append(tool_span.get_span_context())
             tool = self._tools.get(name)
             if tool is None:
                 get_current_span().set_attribute(semconv.TOOL_RESULT_OK, "false")

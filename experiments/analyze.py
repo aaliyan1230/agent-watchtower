@@ -306,11 +306,28 @@ def fault_coverage(results: Sequence[Mapping]) -> dict[str, dict[str, float]]:
     for fault in faults:
         runs = [r for r in results if _positive_label(r) == fault]
         out[fault] = {
-            v: sum(any(f["verifier"] == v for f in r["findings"]) for r in runs)
+            v: sum(
+                any(f["verifier"] == v and not _is_judge_error(f) for f in r["findings"])
+                for r in runs
+            )
             / len(runs)
             for v in verifiers
         }
     return out
+
+
+def _is_judge_error(f: Mapping) -> bool:
+    return f.get("kind") == "judge_error"
+
+
+def _is_judge_opinion(f: Mapping) -> bool:
+    """A judge finding that is the model's verdict on the run, not an
+    outage (timeout, transport error) surfaced as a finding."""
+    return f.get("verifier") == "judge" and not _is_judge_error(f)
+
+
+def judge_error_count(results: Sequence[Mapping]) -> int:
+    return sum(any(_is_judge_error(f) for f in r.get("findings", [])) for r in results)
 
 
 def _percentile(values: Sequence[float], p: float) -> float:
@@ -352,6 +369,11 @@ MODEL_PRICES = {
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "deepseek.v3.2": (0.28, 0.42),
     "moonshotai.kimi-k2.5": (0.60, 2.50),
+    # OpenRouter ids (Nov 2026 list prices)
+    "google/gemini-3.6-flash": (0.75, 3.75),
+    "google/gemini-3.5-flash-lite": (0.30, 2.50),
+    "deepseek/deepseek-v3.2": (0.26, 0.38),
+    "moonshotai/kimi-k2.5": (0.50, 2.50),
 }
 
 
@@ -407,7 +429,7 @@ def judge_vs_deterministic(results: Sequence[Mapping]) -> tuple[float | None, in
     if not judged:
         return None, 0
     det = [any(f["verifier"] != "judge" for f in r["findings"]) for r in judged]
-    jdg = [any(f["verifier"] == "judge" for f in r["findings"]) for r in judged]
+    jdg = [any(_is_judge_opinion(f) for f in r["findings"]) for r in judged]
     return cohen_kappa(det, jdg), len(judged)
 
 
@@ -425,8 +447,8 @@ def judge_agreement(
         rb = bmap.get(key(ra))
         if rb is None or not (ra.get("judged") and rb.get("judged")):
             continue
-        a_flags.append(any(f["verifier"] == "judge" for f in ra["findings"]))
-        b_flags.append(any(f["verifier"] == "judge" for f in rb["findings"]))
+        a_flags.append(any(_is_judge_opinion(f) for f in ra["findings"]))
+        b_flags.append(any(_is_judge_opinion(f) for f in rb["findings"]))
     if len(a_flags) < 2:
         return None, len(a_flags)
     return cohen_kappa(a_flags, b_flags), len(a_flags)
@@ -450,7 +472,7 @@ def judge_agreement_matrix(
     flags = {
         name: [
             any(
-                f["verifier"] == "judge"
+                _is_judge_opinion(f)
                 for f in next(r for r in c if key(r) == k)["findings"]
             )
             for k in order
@@ -702,6 +724,8 @@ def render_table(results: Sequence[Mapping]) -> str:
         lines.append(
             f"judge vs deterministic agreement (n={n_judged} judged runs): kappa={kappa:.2f}"
         )
+        if errors := judge_error_count(cells):
+            lines.append(f"judge errors (outages, not opinions): {errors} runs")
     return "\n".join(lines)
 
 
@@ -988,6 +1012,9 @@ def render_causal_judge(results: Sequence[Mapping], name: str = "") -> str:
         lines.append(
             f"verdict flip across renderings: {_pct(flip)}  (n={n_flip} judged traces)"
         )
+    outages = sum(len(c.get("errors") or {}) for c in cells)
+    if outages:
+        lines.append(f"judge errors (outages, not opinions): {outages} renderings")
     lines.append("")
     lines.append("verdict distribution by rendering")
     lines.append(f"{'rendering':<12}{'PASS':>7}{'FAIL':>7}{'INCONCL':>9}{'absent':>8}")

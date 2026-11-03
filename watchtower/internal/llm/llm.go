@@ -43,7 +43,9 @@ func New(model, apiKey, baseURL string) *Client {
 		apiKey:  apiKey,
 		baseURL: baseURL,
 		model:   model,
-		http:    &http.Client{Timeout: 60 * time.Second},
+		// Reasoning judges (Kimi) emit ~2k tokens per verdict; 60s cut
+		// them off mid-answer on live runs.
+		http: &http.Client{Timeout: 180 * time.Second},
 	}
 }
 

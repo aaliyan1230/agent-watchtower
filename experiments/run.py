@@ -1,8 +1,9 @@
 """Execute the experiment grid against a watchtower server.
 
 Offline by default: FakeProvider drives every cell deterministically —
-free, reproducible, no keys. --live switches to Gemini and the LLM
-judge, for small stratified samples only (the pilot budget rule).
+free, reproducible, no keys. --live switches to real Gemini workers and
+the LLM judge via OpenRouter, for small stratified samples only (the
+pilot budget rule).
 The fault lands on a fixed response step offline (deterministic); live
 cells corrupt every turn instead, because a real model's turn count is
 not predictable.
@@ -24,7 +25,7 @@ from typing import Any
 
 from harness.env import get_api_key
 from harness.faults import FaultInjector, FaultKind, FaultSpec
-from harness.providers import FakeProvider, GeminiProvider, Provider, ProviderResponse
+from harness.providers import FakeProvider, OpenRouterProvider, Provider, ProviderResponse
 from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
@@ -34,7 +35,7 @@ from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, build_
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
-LIVE_MODEL = "gemini-3.5-flash-lite"  # cheapest tier for the pilot
+LIVE_MODEL = "google/gemini-3.5-flash-lite"  # cheapest tier for the pilot, via OpenRouter
 
 
 def aws_env() -> dict[str, str]:
@@ -66,6 +67,22 @@ def aws_env() -> dict[str, str]:
         env["AWS_REGION"] = region
     return env
 
+def judge_server_env(config: str) -> dict[str, str]:
+    """The spawned Go server reads judge credentials from its environment
+    only; hand it exactly the one its configured backend needs."""
+    judge = json.loads(Path(config).read_text()).get("judge") or {}
+    if not judge.get("enabled"):
+        return {}
+    backend = judge.get("backend") or "gemini"
+    if backend == "bedrock":
+        return aws_env()
+    key_env = {"gemini": "GEMINI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}[backend]
+    key = get_api_key(key_env)
+    if not key:
+        raise SystemExit(f"judge backend {backend!r} needs {key_env} in .env")
+    return {key_env: key}
+
+
 # Which response step each fault corrupts in the canonical script
 # below ([0] tool turn, [1] final JSON answer). Live mode uses
 # TOOL_FAULT_STEP for faults that inject tool calls: one corrupted turn
@@ -90,9 +107,9 @@ SYSTEM_PROMPT = (
 TOOLS = [Tool("search", "search the knowledge base", {"q": {"type": "string"}}, lambda q: f"results for {q}: ticket #42")]
 CONTRACT = "ticket"
 
-# Clean run stays well under the token limit (75), a ×10 blowout on
-# the first turn clears it (435) — the experiment config's
-# maxTotalTokens=300 sits between the two.
+# Clean run stays well under the token limit (75), a ×100 blowout on
+# the first turn clears it (4000, after which the supervisor halts) —
+# the experiment config's maxTotalTokens=300 sits between the two.
 NORMAL_SCRIPT = [
     ProviderResponse(tool_calls=[{"name": "search", "args": {"q": "login"}}], input_tokens=30, output_tokens=10),
     ProviderResponse(content='{"id": 1, "title": "broken login", "labels": ["auth"]}', input_tokens=20, output_tokens=15),
@@ -129,7 +146,7 @@ def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]
             spec = FaultSpec(FaultKind(cell.fault), seed=cell.seed, step=FAULT_STEP[cell.fault])
     provider: Provider
     if live:
-        provider = GeminiProvider(model=LIVE_MODEL, api_key=get_api_key("GEMINI_API_KEY"))
+        provider = OpenRouterProvider(model=LIVE_MODEL)
     else:
         provider = FakeProvider(NORMAL_SCRIPT)
     if spec is not None:
@@ -213,12 +230,12 @@ def main() -> None:
     parser.add_argument("--false-assurance", action="store_true", help="run the behavior x telemetry 2x2 grid")
     parser.add_argument("--trace-dir", type=Path, default=Path("artifacts/traces"), help="directory for clean trace artifacts")
     parser.add_argument("--no-traces", action="store_true", help="disable durable trace recording")
-    parser.add_argument("--judge", choices=["gemini", "bedrock", "kimi"], default="gemini", help="judge backend for live mode")
+    parser.add_argument("--judge", choices=["gemini", "deepseek", "kimi"], default="gemini", help="judge family for live mode")
     parser.add_argument("--config", type=str, default="", help="config file name under watchtower/testdata (baseline runs)")
     args = parser.parse_args()
 
-    if args.live and args.judge == "gemini" and not get_api_key("GEMINI_API_KEY"):
-        raise SystemExit("--live --judge gemini needs GEMINI_API_KEY in .env")
+    if args.live and not get_api_key("OPENROUTER_API_KEY"):
+        raise SystemExit("--live needs OPENROUTER_API_KEY in .env")
 
     if args.false_assurance:
         if args.pilot:
@@ -247,18 +264,14 @@ def main() -> None:
     config_name = {
         ("offline", "gemini"): "experiment_config.json",
         ("live", "gemini"): "experiment_live_config.json",
-        ("live", "bedrock"): "experiment_live_bedrock_config.json",
+        ("live", "deepseek"): "experiment_live_deepseek_config.json",
         ("live", "kimi"): "experiment_live_kimi_config.json",
     }[("live" if args.live else "offline", args.judge)]
     if args.config:
         config_name = args.config
     config = str(REPO_ROOT / "watchtower" / "testdata" / config_name)
     config_checksum = file_checksum(config)
-    env: dict[str, str] | None = None
-    if args.live:
-        env = {"GEMINI_API_KEY": get_api_key("GEMINI_API_KEY") or ""}
-        if args.judge in ("bedrock", "kimi"):
-            env = aws_env()  # both ride the Bedrock transport
+    env = judge_server_env(config) if args.live else None
     proc = spawn_server(ENDPOINT, ADDR, config, env)
     try:
         results: list[CellResult] = []

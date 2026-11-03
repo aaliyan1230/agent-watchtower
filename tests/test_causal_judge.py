@@ -75,7 +75,30 @@ def test_run_judge_limit():
     assert len(out) == 4  # first 4 cells only
 
 
-def _gemini_completion(content):
+
+class _FlakyJudge:
+    """Fails the second call with a transport error, answers PASS otherwise."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def judge(self, render):
+        self.calls += 1
+        if self.calls == 2:
+            raise httpx.ConnectError("connection reset by peer")
+        return "PASS", {"inputTokens": 1, "outputTokens": 1, "durationMs": 1.0}
+
+
+def test_run_judge_records_outage_without_aborting():
+    judge = _FlakyJudge()
+    out = run_judge(_cells(1), judge, limit=2)
+    assert len(out) == 2
+    assert set(out[0]["renderings"]) == {"text", "canonical"}
+    assert out[0]["errors"]["time_sorted"].startswith("ConnectError")
+    assert "errors" not in out[1]
+    assert set(out[1]["renderings"]) == {"text", "time_sorted", "canonical"}
+
+def _completion(content):
     return httpx.Response(
         200,
         json={
@@ -85,67 +108,38 @@ def _gemini_completion(content):
     )
 
 
-def test_make_judge_gemini_mock_transport():
+@pytest.mark.parametrize("family", ["gemini", "deepseek", "kimi"])
+def test_make_judge_family_rides_openrouter(monkeypatch, family):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    seen = {}
+
     def handler(request):
-        assert request.headers["authorization"].startswith("Bearer ")
-        return _gemini_completion('{"verdict": "INCONCLUSIVE"}')
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        seen["model"] = __import__("json").loads(request.read())["model"]
+        return _completion('{"verdict": "INCONCLUSIVE"}')
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    judge = make_judge("gemini", model="test-model", base_url="http://mock", http=http)
-    assert judge.model == "test-model"
+    judge = make_judge(family, base_url="http://mock", http=http)
     verdict, usage = judge.judge("a rendering")
+    assert judge.name == family
+    assert judge.model == cj.FAMILY_MODELS[family]
+    assert seen == {"url": "http://mock/chat/completions", "auth": "Bearer test-key", "model": cj.FAMILY_MODELS[family]}
     assert verdict == "INCONCLUSIVE"
     assert usage["inputTokens"] == 7
     assert usage["outputTokens"] == 2
 
 
-def test_make_judge_gemini_missing_key_fails(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "")
-    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        make_judge("gemini", model="x", base_url="http://mock", http=httpx.Client())
+def test_make_judge_model_override(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: _completion("PASS")))
+    assert make_judge("gemini", model="test-model", base_url="http://mock", http=http).model == "test-model"
 
 
-def test_make_judge_kimi_mock_transport(monkeypatch):
-    monkeypatch.setattr(
-        cj,
-        "aws_env",
-        lambda: {
-            "AWS_ACCESS_KEY_ID": "AK",
-            "AWS_SECRET_ACCESS_KEY": "SK",
-            "AWS_REGION": "us-east-1",
-        },
-    )
-    seen = {}
-
-    def handler(request):
-        seen["url"] = str(request.url)
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "PASS"}}],
-                "usage": {"prompt_tokens": 9, "completion_tokens": 3},
-            },
-        )
-
-    judge = make_judge(
-        "kimi",
-        base_url="https://mock.example.com",
-        http=httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    assert judge.name == "kimi"
-    assert judge.model == "moonshotai.kimi-k2.5"
-    verdict, usage = judge.judge("rendering")
-    assert verdict == "PASS"
-    assert usage["inputTokens"] == 9
-    assert usage["durationMs"] >= 0
-    assert seen["url"].startswith("https://mock.example.com/model/")
-    assert seen["url"].endswith("/invoke")
-
-
-def test_make_judge_bedrock_missing_creds(monkeypatch):
-    monkeypatch.setattr(cj, "aws_env", lambda: {})
-    with pytest.raises(ValueError, match="AWS_ACCESS_KEY_ID"):
-        make_judge("bedrock", http=httpx.Client())
+def test_make_judge_missing_key_fails(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        make_judge("deepseek", base_url="http://mock", http=httpx.Client())
 
 
 def test_make_judge_unknown_family():

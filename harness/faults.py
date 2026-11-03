@@ -39,7 +39,7 @@ class FaultKind(Enum):
     SCHEMA_VIOLATION = "schema_violation"  # contract field gets the wrong type
     POLICY_VIOLATION = "policy_violation"  # tool call to a disallowed tool
     LOOP = "loop"  # the same tool call repeats 3x
-    BUDGET_BLOWOUT = "budget_blowout"  # token counts inflated 10x
+    BUDGET_BLOWOUT = "budget_blowout"  # token counts inflated 100x
     PROVIDER_TIMEOUT = "provider_timeout"  # call raises
 
 

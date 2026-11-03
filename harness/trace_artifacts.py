@@ -25,6 +25,9 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 TRACE_SCHEMA_VERSION = "watchtower.trace.v1"
 MANIFEST_SCHEMA_VERSION = "watchtower.manifest.v1"
+# A span id guaranteed not to appear in any exported batch, used by the
+# orphan_link_target fault to model a causally-relevant span in flight.
+FOREIGN_SPAN_ID = "feedfacecafef00d"
 
 
 def _value(value: Any) -> str:
@@ -87,6 +90,18 @@ def parse_time(value: str) -> int:
         value = value[:-1] + "+00:00"
     parsed = datetime.fromisoformat(value)
     return int(parsed.timestamp() * 1_000_000_000)
+
+
+def _link(link: Any) -> dict[str, Any]:
+    context = getattr(link, "context", None)
+    out: dict[str, Any] = {"spanId": _context_id(context, "span_id", 16)}
+    trace_id = _context_id(context, "trace_id", 32)
+    if trace_id:
+        out["traceId"] = trace_id
+    encoded = _attributes(getattr(link, "attributes", None))
+    if encoded:
+        out["attributes"] = encoded
+    return out
 
 
 def _event(event: Any) -> dict[str, Any]:
@@ -167,6 +182,11 @@ def span_to_dict(span: Any) -> dict[str, Any]:
         out["attributes"] = encoded_attrs
     if events:
         out["events"] = [_event(item) for item in events]
+    links = getattr(span, "links", None)
+    if links is None:
+        links = getattr(span, "_links", ())
+    if links:
+        out["links"] = [_link(item) for item in links]
     # Resource is repeated on every SDK span.  The envelope stores it once;
     # callers use envelope_from_spans rather than this helper directly when
     # writing an artifact.
@@ -434,6 +454,28 @@ def apply_evidence_fault(envelope: Mapping[str, Any], fault: str | None) -> dict
             span["startTime"] = format_time(new_start)
             span["endTime"] = format_time(new_start + duration)
             break
+    elif fault == "truncate_closed":
+        for span in spans:
+            attrs = span.get("attributes")
+            if attrs and "watchtower.trace.closed" in attrs:
+                attrs.pop("watchtower.trace.closed")
+                if not attrs:
+                    span.pop("attributes")
+    elif fault == "drop_attribute":
+        for span in spans:
+            if span.get("name") == "chat":
+                (span.get("attributes") or {}).pop("gen_ai.system", None)
+                break
+    elif fault == "sample_spans":
+        spans = [s for i, s in enumerate(spans) if i % 2 == 0]
+    elif fault == "drop_link":
+        for span in spans:
+            span.pop("links", None)
+    elif fault == "orphan_link_target":
+        for span in spans:
+            if span.get("links"):
+                span["links"][0]["spanId"] = FOREIGN_SPAN_ID
+                break
     else:
         raise ValueError(f"unknown evidence fault: {fault}")
     out["spans"] = spans

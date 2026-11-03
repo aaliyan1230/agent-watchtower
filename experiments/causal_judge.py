@@ -7,10 +7,11 @@ three comparator renderings of the *same trace* — ordinary text
 (arrival order), timestamp-sorted, and canonical DAG. That is the
 "verifier order-sensitivity" number the CausalTrace plan owes the paper.
 
-Three judge families, chosen to be independent:
-  - gemini  -> harness.providers.GeminiProvider (OpenAI-compatible)
-  - bedrock -> experiments.bedrock.Client signing `deepseek.v3.2`
-  - kimi    -> the same Bedrock transport signing `moonshotai.kimi-k2.5`
+Three judge families, chosen to be independent, all reached through
+harness.providers.OpenRouterProvider (one key, OpenAI-compatible):
+  - gemini   -> google/gemini-3.5-flash-lite
+  - deepseek -> deepseek/deepseek-v3.2
+  - kimi     -> moonshotai/kimi-k2.5
 
 Offline CI stays green: every real client is injected in tests via a
 mock HTTP transport, and FakeCausalJudge exercises the driver without
@@ -18,7 +19,7 @@ any network. Live runs gate on the .env keys exactly like the existing
 experiment live targets.
 
 Usage: python -m experiments.causal_judge --results artifacts/results-causal.json
-                                          --judge gemini|bedrock|kimi [--limit N]
+                                          --judge gemini|deepseek|kimi [--limit N]
 """
 
 from __future__ import annotations
@@ -32,19 +33,19 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from harness.providers import GeminiProvider
+import httpx
 
-from .bedrock import Client as BedrockClient
-from .bedrock import Credentials
+from harness.providers import OpenRouterProvider
+
 from .causal_run import CAUSAL_PROTOCOL
-from .run import aws_env
 from .suite import PROTOCOL_VERSION
 
 RENDERINGS = ("text", "time_sorted", "canonical")
-LIVE_MODEL = "gemini-3.5-flash-lite"
-
-BEDROCK_MODEL = "deepseek.v3.2"
-KIMI_MODEL = "moonshotai.kimi-k2.5"
+FAMILY_MODELS = {
+    "gemini": "google/gemini-3.5-flash-lite",
+    "deepseek": "deepseek/deepseek-v3.2",
+    "kimi": "moonshotai/kimi-k2.5",
+}
 
 SYSTEM = (
     "You are an evidence reviewer for a causal trace verifier. You are shown ONE "
@@ -114,11 +115,10 @@ class FakeCausalJudge:
         return verdict, usage
 
 
-class GeminiCausalJudge:
-    name = "gemini"
-
-    def __init__(self, provider: GeminiProvider):
+class ChatCausalJudge:
+    def __init__(self, provider: OpenRouterProvider, name: str):
         self._provider = provider
+        self.name = name
         self.model = provider.model
 
     def judge(self, render: str) -> tuple[str, dict]:
@@ -132,57 +132,24 @@ class GeminiCausalJudge:
         return parse_verdict(resp.content), usage
 
 
-class BedrockCausalJudge:
-    name = "bedrock"
-
-    def __init__(self, client: BedrockClient):
-        self._client = client
-        self.model = client.model
-
-    def judge(self, render: str) -> tuple[str, dict]:
-        start = time.monotonic()
-        text, usage = self._client.chat(SYSTEM, USER_TEMPLATE.format(render=render))
-        usage["durationMs"] = round((time.monotonic() - start) * 1000, 1)
-        return parse_verdict(text), usage
-
-
 def make_judge(
     name: str,
     model: str | None = None,
     base_url: str | None = None,
     http=None,
 ) -> CausalJudge:
-    """Build a live judge for one family. Keys come from the environment
-    (.env or the AWS CLI session via experiments.run.aws_env) and missing
-    keys fail loudly. ``base_url`` / ``http`` let tests point a client at a
-    mock server / transport without any network."""
-    if name == "gemini":
-        provider = GeminiProvider(
-            model=model or LIVE_MODEL,
-            api_key=None,  # None -> read from .env
-            base_url=base_url,
-            client=http,
-        )
-        return GeminiCausalJudge(provider)
-    if name in ("bedrock", "kimi"):
-        env = aws_env()
-        creds = Credentials(
-            env.get("AWS_ACCESS_KEY_ID", ""),
-            env.get("AWS_SECRET_ACCESS_KEY", ""),
-            env.get("AWS_SESSION_TOKEN", ""),
-        )
-        if not creds.access_key or not creds.secret_key:
-            raise ValueError(
-                f"{name} causal judge needs AWS_ACCESS_KEY_ID and "
-                "AWS_SECRET_ACCESS_KEY in .env or the AWS CLI"
-            )
-        region = env.get("AWS_REGION") or "us-east-1"
-        model = model or (BEDROCK_MODEL if name == "bedrock" else KIMI_MODEL)
-        client = BedrockClient(model, region, creds, base_url=base_url, http=http)
-        judge: CausalJudge = BedrockCausalJudge(client)
-        judge.name = name
-        return judge
-    raise ValueError(f"unknown judge {name!r}; expected gemini|bedrock|kimi")
+    """Build a live judge for one family. The key comes from .env and a
+    missing key fails loudly. ``base_url`` / ``http`` let tests point the
+    client at a mock transport without any network."""
+    if name not in FAMILY_MODELS:
+        raise ValueError(f"unknown judge {name!r}; expected {'|'.join(FAMILY_MODELS)}")
+    provider = OpenRouterProvider(
+        model=model or FAMILY_MODELS[name],
+        api_key=None,  # None -> read from .env
+        base_url=base_url,
+        client=http,
+    )
+    return ChatCausalJudge(provider, name)
 
 
 def run_judge(
@@ -202,22 +169,30 @@ def run_judge(
         renders = cell.get("renderings") or {}
         per: dict[str, str] = {}
         usage: dict[str, dict] = {}
+        errors: dict[str, str] = {}
         for key in render_keys:
             render = renders.get(key)
             if not render:
                 continue
-            verdict, u = judge.judge(render)
+            try:
+                verdict, u = judge.judge(render)
+            except httpx.HTTPError as exc:
+                # An outage is not an opinion: leave the rendering unjudged
+                # rather than abort a long paid run or invent a verdict.
+                errors[key] = f"{type(exc).__name__}: {exc}"
+                continue
             per[key] = verdict
             usage[key] = u
-        out.append(
-            {
-                "traceId": cell.get("traceId") or cell.get("trace_id") or "",
-                "evidenceFault": cell.get("evidenceFault"),
-                "checksum": cell.get("checksum", ""),
-                "renderings": per,
-                "usage": usage,
-            }
-        )
+        row = {
+            "traceId": cell.get("traceId") or cell.get("trace_id") or "",
+            "evidenceFault": cell.get("evidenceFault"),
+            "checksum": cell.get("checksum", ""),
+            "renderings": per,
+            "usage": usage,
+        }
+        if errors:
+            row["errors"] = errors
+        out.append(row)
     return out
 
 
@@ -233,7 +208,7 @@ def main() -> None:
         "--results", type=Path, default=Path("artifacts/results-causal.json")
     )
     parser.add_argument(
-        "--judge", choices=["gemini", "bedrock", "kimi"], default="gemini"
+        "--judge", choices=list(FAMILY_MODELS), default="gemini"
     )
     parser.add_argument(
         "--model", type=str, default="", help="override the family default"

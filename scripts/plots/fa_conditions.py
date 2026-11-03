@@ -17,12 +17,13 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 CONDITIONS = [
-    ("clean x clean", False, False),
-    ("clean x faulty telem.", False, True),
-    ("faulty x clean telem.", True, False),
-    ("faulty x faulty telem.", True, True),
+    ("clean\n$\\times$ clean", False, False),
+    ("clean\n$\\times$ faulty", False, True),
+    ("faulty\n$\\times$ clean", True, False),
+    ("faulty\n$\\times$ faulty", True, True),
 ]
 SEGMENTS = ["PASS", "FAIL / FLAGGED", "INCONCLUSIVE"]
 COLORS = ["#4c9f70", "#b0433f", "#8a8fb4"]
@@ -64,12 +65,13 @@ def main() -> None:
     contract = composition(load(args.contract)["cells"])
     baseline = composition(load(args.baseline)["cells"])
 
-    fig, ax = plt.subplots(figsize=(5.0, 2.6))
-    width = 0.38
+    fig, ax = plt.subplots(figsize=(5.4, 3.1))
+    width = 0.34
     xs = range(len(CONDITIONS))
-    for offset, (config, comp, hatch) in enumerate(
-        [(-width / 2 - 0.01, contract, ""), (width / 2 + 0.01, baseline, "//")]
-    ):
+    for offset, comp, hatch in [
+        (-width / 2 - 0.01, contract, ""),
+        (width / 2 + 0.01, baseline, "//"),
+    ]:
         bottoms = [0.0] * len(CONDITIONS)
         for seg_idx, segment in enumerate(SEGMENTS):
             values = [comp[(b, t)][seg_idx] for _, b, t in CONDITIONS]
@@ -82,14 +84,14 @@ def main() -> None:
                 hatch=hatch if seg_idx < 2 else "",
                 edgecolor="white",
                 linewidth=0.5,
-                label=segment if not offset else None,
+                label=segment if offset < 0 else None,
             )
             for x, value, bottom in zip(xs, values, bottoms):
                 if value >= 0.08:
                     ax.text(
                         x + offset, bottom + value / 2,
                         f"{value:.0%}", ha="center", va="center",
-                        fontsize=7, color="white" if seg_idx == 1 else "black",
+                        fontsize=7.5, color="white" if seg_idx == 1 else "black",
                     )
             bottoms = [b + v for b, v in zip(bottoms, values)]
 
@@ -97,10 +99,26 @@ def main() -> None:
     ax.set_xticklabels([label for label, *_ in CONDITIONS], fontsize=8)
     ax.set_ylabel("fraction of runs", fontsize=9)
     ax.set_ylim(0, 1.02)
-    ax.legend(fontsize=8, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14), frameon=False)
+    legend_handles = [
+        Patch(facecolor=COLORS[0], edgecolor="white", label="PASS"),
+        Patch(facecolor=COLORS[1], edgecolor="white", label="FAIL / FLAGGED"),
+        Patch(facecolor=COLORS[2], edgecolor="white", label="INCONCLUSIVE"),
+        Patch(facecolor="white", edgecolor="black", label="Contract (solid)"),
+        Patch(facecolor="white", edgecolor="black", hatch="//", label="Ablation (hatched)"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        fontsize=7.5,
+        ncol=3,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.27),
+        frameon=False,
+        columnspacing=1.0,
+        handlelength=1.5,
+    )
     ax.spines[["top", "right"]].set_visible(False)
     ax.tick_params(axis="y", labelsize=8)
-    fig.tight_layout()
+    fig.subplots_adjust(top=0.69, bottom=0.22, left=0.12, right=0.98)
     fig.savefig(args.out, bbox_inches="tight")
     print(f"wrote {args.out}")
 

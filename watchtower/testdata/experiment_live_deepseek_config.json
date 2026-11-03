@@ -21,8 +21,10 @@
       "requireToolResults": true,
       "requireFinalAnswer": true,
       "requireSupervisorDecision": true,
-      "requireTemporalNesting": true
+      "requireTemporalNesting": true,
+      "requireTraceClosed": true,
+      "requireCausalLinks": true
     }
   },
-  "judge": { "enabled": true, "backend": "bedrock", "model": "deepseek.v3.2" }
+  "judge": { "enabled": true, "backend": "openrouter", "model": "deepseek/deepseek-v3.2" }
 }

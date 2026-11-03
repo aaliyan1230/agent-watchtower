@@ -124,6 +124,14 @@ func ClaimReference() []Claim {
 			},
 			Action: "wait for the full export batch or recall the remaining spans",
 		},
+		{
+			Name:      "causal_links",
+			Statement: "every tool result consumed by a later LLM turn of the same agent is recorded as a span link from that turn",
+			Requires: []EvidenceReq{
+				{What: "span.link", Provenance: ProvenanceOTelCore},
+			},
+			Action: "extend producer instrumentation to link each LLM turn to the tool spans it consumed",
+		},
 	}
 }
 
@@ -139,6 +147,7 @@ func (o EvidenceObligations) Claims() []Claim {
 		"supervisor_decision": o.RequireSupervisorDecision,
 		"temporal_nesting":    o.RequireTemporalNesting,
 		"trace_closed":        o.RequireTraceClosed,
+		"causal_links":        o.RequireCausalLinks,
 	}
 	// trace_integrity rides on the structural findings and is always
 	// part of the evidence contract when evidence checking is on.

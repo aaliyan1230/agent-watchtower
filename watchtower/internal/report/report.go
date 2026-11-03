@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.12"
+const ProtocolVersion = "0.13"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -82,24 +82,19 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 }
 
 // verdictFor maps findings to a verdict. Ordering is deliberate and
-// runs from strongest-to-weakest confidence: an observed critical
-// violation fails unless the trace was never declared closed; an
-// unclosed trace abstains INCONCLUSIVE (spans may still arrive, so even
-// a FAIL seen so far cannot be trusted — the paper's "no premature
-// PASS" contract); a closed-but-incomplete trace also abstains
-// INCONCLUSIVE; a judge critical finding fails when the channel
-// supports it; warnings flag. Only a closed, complete, clean run
-// passes.
+// runs from strongest-to-weakest confidence: an observed deterministic
+// critical violation fails even on an unclosed or incomplete trace,
+// because spans arriving later cannot undo a forbidden call, an
+// exceeded budget, or an invalid output already received; any evidence
+// gap, including an unclosed trace, abstains INCONCLUSIVE (no premature
+// PASS); a judge critical finding fails only when the channel supports
+// it; warnings flag. Only a closed, complete, clean run passes.
 func verdictFor(findings []verify.Finding) Verdict {
 	detCritical, judgeCritical := false, false
-	warning, evidenceGap, unclosed := false, false, false
+	warning, evidenceGap := false, false
 	for _, f := range findings {
 		if f.Kind == verify.FindingEvidenceGap {
-			if f.Claim == "trace_closed" {
-				unclosed = true
-			} else {
-				evidenceGap = true
-			}
+			evidenceGap = true
 			continue
 		}
 		if f.Severity == verify.SeverityCritical {
@@ -113,8 +108,6 @@ func verdictFor(findings []verify.Finding) Verdict {
 		warning = true
 	}
 	switch {
-	case unclosed:
-		return VerdictInconclusive
 	case detCritical:
 		return VerdictFail
 	case evidenceGap:
