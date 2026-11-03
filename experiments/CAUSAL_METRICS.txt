@@ -28,10 +28,14 @@ Provenance caveats (audit, 3 Nov 2026)
 - Metric 4 is a deterministic estimate scaled by DAG size, not a measured
   token count or wall-clock time.
 - The live judge section below was re-run on 3 Nov 2026 over the full
-  160-cell grid through OpenRouter (real models, no mocks). Artifacts:
-  artifacts/results-causal-judge-{gemini,deepseek}.json, both pinned to
-  source checksum 9e423993... of results-causal.json. The earlier n=20
-  numbers had no artifact and are retired.
+  160-cell grid with current mid-tier models (Gemini via the Gemini API,
+  DeepSeek and Kimi via OpenRouter), each at its minimum reasoning
+  setting. Artifacts: artifacts/results-causal-judge-{gemini,deepseek,
+  kimi}.json, all pinned to source checksum 9e423993... of
+  results-causal.json. Earlier numbers (n=20, and the Nov 3 run on
+  gemini-3.5-flash-lite / deepseek-v3.2) are superseded.
+- Gemini direct reports no reasoning tokens in its OpenAI-compatible
+  usage, so the Gemini cost below may undercount thinking at "low".
 
 Grid
 ----
@@ -86,47 +90,57 @@ Metric definitions and current values (offline grid, results-causal.json)
      closed x orphan_link_target       PASS   0%  FAIL 0%  INCONCL 100% (n=40)
      unclosed x truncate_closed        PASS   0%  FAIL 0%  INCONCL 100% (n=40)
 
-Live judge section (results-causal-judge-*.json, OPENROUTER_API_KEY in .env)
------------------------------------------------------------------------------
+Live judge section (results-causal-judge-*.json)
+-----------------------------------------------
 Sample: the full grid, 160 traces x 3 renderings = 480 live calls per
-family, all through OpenRouter. Prompts are identical in structure
+family, 0 outages in all three. Prompts are identical in structure
 across the three renderings; the renderings carry the FULL span facts
 (attributes + links) so a flip means the *arrangement* moved the judge,
 not that information was missing.
+
+Judges (mid-tier, no flagship models; minimum reasoning per model,
+because vendor "low" levels are not comparable):
+   gemini   gemini-3.8-flash                   Gemini API   reasoning low
+   deepseek deepseek/deepseek-v4.1-flash-1017  OpenRouter   reasoning off
+   kimi     moonshotai/kimi-k3                 OpenRouter   reasoning off
 
 judge_flip_rate -- fraction of judged traces whose LLM verdict differs
    across the three renderings (text / time_sorted / canonical) of the
    same factual log. Order-robustness claim => 0; live judges are far
    from it, which is the measured phenomenon.
-   Current:  gemini   (google/gemini-3.5-flash-lite)  0.48 (n=160)
-             deepseek (deepseek/deepseek-v3.2)        0.65 (n=160)
-             kimi     (moonshotai/kimi-k2.5)          not measured: with default
-                      reasoning it spent ~40s and ~4.5k reasoning tokens per
-                      call, so the full grid was cancelled. The next model
-                      refresh sets judge reasoning explicitly.
+   Current:  gemini   0.38 (n=160)
+             deepseek 0.56 (n=160)
+             kimi     0.57 (n=160)
 
    PASS counts per rendering (text / time_sorted / canonical, of 160):
-             gemini   42 / 43 / 80
-             deepseek  2 /  1 / 36
-   The canonical DAG rendering roughly doubles PASS for both families:
-   presentation alone moves the verdict.
+             gemini    69 / 107 / 101
+             deepseek  75 /  59 / 130
+             kimi      44 /  67 / 121
 
    leak table (fraction PASS per fault x rendering, text/time/canonical):
-             gemini   drop_link 0.57/0.38/0.55  orphan 0/0/0
-                      truncate_closed 0.28/0.35/0.78
-             deepseek drop_link 0.05/0/0.35     orphan 0/0/0.10
-                      truncate_closed 0/0/0.28
-   truncate_closed (an unclosed trace) should never PASS; the canonical
-   rendering leaks it most for both families.
+             gemini   drop_link 1.00/0.90/0.98  orphan 0/0/0
+                      truncate_closed 0.35/0.92/0.82
+             deepseek drop_link 0.90/0.60/1.00  orphan 0.02/0.05/0.25
+                      truncate_closed 0.50/0.38/1.00
+             kimi     drop_link 0.55/0.62/0.95  orphan 0/0.18/0.10
+                      truncate_closed 0.28/0.42/0.98
+   truncate_closed (an unclosed trace) should never PASS. Every family
+   passes it in 82-100% of canonical renderings: the clean DAG reads as
+   a finished run even though the closure marker is absent.
 
-cross-family judge kappa -- Cohen's kappa (PASS vs not) over shared
-   (trace, rendering) pairs. Current (n=480 shared pairs):
-             gemini vs deepseek 0.14
-   The 3-family matrix waits on the model refresh.
+cross-family judge kappa -- Cohen's kappa (PASS vs not) over the 480
+   shared (trace, rendering) pairs, and each family vs the majority:
+             gemini vs deepseek 0.55   gemini vs kimi 0.52
+             deepseek vs kimi   0.61
+             consensus kappa: gemini 0.73, deepseek 0.82, kimi 0.79
+   The current families agree with each other far more than the older
+   ones did (gemini-3.5-flash-lite vs deepseek-v3.2 was 0.14), yet each
+   still flips on presentation alone.
 
-Live spend (measured tokens x OpenRouter list prices)
------------------------------------------------------
-   google/gemini-3.5-flash-lite  480 calls ~$0.075  (206951 in / 5308 out)
-   deepseek/deepseek-v3.2        480 calls ~$0.050  (185071 in / 5207 out)
-   All live work in this round (pilots + causal judge) stays well under
-   the $15 cap.
+Live spend (measured tokens x list prices)
+------------------------------------------
+   gemini-3.8-flash                   480 calls ~$0.19  (207911 in / 3392 out)
+   deepseek/deepseek-v4.1-flash-1017  480 calls ~$0.06  (187179 in / 3711 out)
+   moonshotai/kimi-k3                 480 calls ~$1.22  (213492 in / 78571 out;
+                                      "off" still emits ~160 tokens a call)
+   All live work stays well under the $15 cap.
