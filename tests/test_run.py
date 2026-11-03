@@ -267,3 +267,17 @@ def test_judge_errors_are_not_judge_opinions():
     assert fault_coverage(results)["loop"]["judge"] == 1.0
     kappa, n = judge_vs_deterministic(results)
     assert n == 2 and kappa == 1.0  # the outage counts as "judge silent", matching the clean deterministic opinion
+
+
+def test_telemetry_grids_never_claim_grid_json(tmp_path, monkeypatch):
+    import sys
+
+    from experiments import run, suite
+
+    monkeypatch.setattr(sys, "argv", ["suite", "--evidence", "--out", str(tmp_path)])
+    suite.main()
+    assert [p.name for p in tmp_path.iterdir()] == ["grid-evidence.json"]
+
+    monkeypatch.setattr(sys, "argv", ["run", "--grid", str(tmp_path / "grid-evidence.json")])
+    with pytest.raises(SystemExit, match="evidence grid"):
+        run.main()

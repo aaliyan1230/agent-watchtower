@@ -257,6 +257,8 @@ def main() -> None:
         grid_checksum = "pilot"
     else:
         grid = json.loads(args.grid.read_text())
+        if grid.get("gridKind", "behavior") != "behavior":
+            raise SystemExit(f"{args.grid} is a {grid['gridKind']} grid; pass --evidence or --false-assurance instead")
         cells = [ExperimentCell(**c) for c in grid["cells"]]
         grid_checksum = grid["checksum"]
     if args.limit:
