@@ -31,3 +31,5 @@ scripts/diagrams/node_modules/
 
 # compiled producer binary
 producers/goproducer/goproducer
+
+tmp
