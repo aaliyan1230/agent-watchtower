@@ -90,9 +90,9 @@ SYSTEM_PROMPT = (
 TOOLS = [Tool("search", "search the knowledge base", {"q": {"type": "string"}}, lambda q: f"results for {q}: ticket #42")]
 CONTRACT = "ticket"
 
-# Clean run stays well under the token limit (75), a ×10 blowout on
-# the first turn clears it (435) — the experiment config's
-# maxTotalTokens=300 sits between the two.
+# Clean run stays well under the token limit (75), a ×100 blowout on
+# the first turn clears it (4000, after which the supervisor halts) —
+# the experiment config's maxTotalTokens=300 sits between the two.
 NORMAL_SCRIPT = [
     ProviderResponse(tool_calls=[{"name": "search", "args": {"q": "login"}}], input_tokens=30, output_tokens=10),
     ProviderResponse(content='{"id": 1, "title": "broken login", "labels": ["auth"]}', input_tokens=20, output_tokens=15),
