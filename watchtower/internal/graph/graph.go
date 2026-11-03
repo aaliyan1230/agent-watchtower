@@ -267,13 +267,16 @@ func Reconstruct(spans []model.Span) (*Run, error) {
 	return run, nil
 }
 
-// tracesClosed reports whether any span carries the explicit end-of-trace
-// marker. Marker placement is deliberately lenient (root or leaf): the
-// harness stamps it on the answer/supervisor span, but a producer using
-// plain OTel would put it on whatever span ends last. What matters for
-// verification is only that the trace declared itself complete.
+// tracesClosed reports whether a root span carries the explicit
+// end-of-trace marker. Only the root counts: a worker that finishes
+// early stamps its own span while the supervisor is still running, so
+// accepting the marker anywhere would let a partial batch look closed.
+// An orphan (parent id set but parent absent) is not a root.
 func tracesClosed(spans []*model.Span) bool {
 	for _, s := range spans {
+		if s.ParentID != "" {
+			continue
+		}
 		if closed, ok := s.AttrBool(model.WatchtowerTraceClosed); ok && closed {
 			return true
 		}

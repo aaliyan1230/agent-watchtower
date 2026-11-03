@@ -41,10 +41,11 @@ func TestVerdictFor(t *testing.T) {
 		{name: "unclosed trace is inconclusive", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
 		}, want: VerdictInconclusive},
-		{name: "unclosed even with critical violation is inconclusive", findings: []verify.Finding{
+		// Later spans cannot undo a violation already received.
+		{name: "observed critical violation fails even when unclosed", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
 			{Verifier: "policy", Severity: verify.SeverityCritical},
-		}, want: VerdictInconclusive},
+		}, want: VerdictFail},
 		{name: "unclosed beats judge critical", findings: []verify.Finding{
 			{Verifier: "evidence", Kind: verify.FindingEvidenceGap, Severity: verify.SeverityWarning, Claim: "trace_closed"},
 			{Verifier: "judge", Severity: verify.SeverityCritical, Source: "gemini-3.6-flash"},
