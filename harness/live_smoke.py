@@ -9,60 +9,16 @@ Run: .venv/bin/python -m harness.live_smoke
 
 from __future__ import annotations
 
-import subprocess
-import time
-import urllib.error
-import urllib.request
-from pathlib import Path
-
 from harness.env import get_api_key
 from harness.providers import GeminiProvider
+from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
 from harness.workers import Tool, Worker
 
 ENDPOINT = "http://127.0.0.1:4318"
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def server_up() -> bool:
-    try:
-        urllib.request.urlopen(ENDPOINT + "/v1/traces", timeout=1)
-        return True
-    except urllib.error.HTTPError:
-        return True
-    except (urllib.error.URLError, OSError):
-        return False
-
-
-def spawn_server(api_key: str) -> subprocess.Popen:
-    # A stale instance from an earlier run would be reused by the
-    # readiness check and silently serve old code.
-    subprocess.run(["pkill", "-f", "/tmp/watchtower-smoke"], check=False)
-    subprocess.run(
-        ["go", "build", "-o", "/tmp/watchtower-smoke", "./cmd/watchtower"],
-        cwd=REPO_ROOT / "watchtower",
-        check=True,
-    )
-    env = {"GEMINI_API_KEY": api_key}
-    proc = subprocess.Popen(
-        [
-            "/tmp/watchtower-smoke",
-            "serve",
-            "--addr",
-            "127.0.0.1:4318",
-            "--config",
-            str(REPO_ROOT / "watchtower" / "testdata" / "judge_config.json"),
-        ],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    for _ in range(100):
-        if server_up():
-            return proc
-        time.sleep(0.1)
-    raise RuntimeError("server did not come up")
+ADDR = "127.0.0.1:4318"
+CONFIG = str(REPO_ROOT / "watchtower" / "testdata" / "judge_config.json")
 
 
 def main() -> None:
@@ -71,7 +27,7 @@ def main() -> None:
         raise SystemExit("GEMINI_API_KEY missing: add it to .env (see .env.example)")
     print("gemini key present; spawning watchtower serve with judge enabled")
 
-    proc = spawn_server(api_key)
+    proc = spawn_server(ENDPOINT, ADDR, CONFIG, env={"GEMINI_API_KEY": api_key})
     try:
         telemetry = HarnessTelemetry(ENDPOINT, service_name="live-smoke")
         provider = GeminiProvider(model="gemini-3.5-flash-lite", api_key=api_key)
