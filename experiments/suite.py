@@ -166,8 +166,12 @@ def main() -> None:
         "checksum": checksum(cells),
         "cells": [asdict(c) for c in cells],
     }
-    (args.out / "grid.json").write_text(json.dumps(manifest, indent=2))
-    print(f"grid: {len(cells)} cells, protocol {PROTOCOL_VERSION}, sha256 {manifest['checksum'][:12]} -> {args.out / 'grid.json'}")
+    # Only the behavior grid may own grid.json: run.py reads it by default,
+    # and a telemetry grid there silently turns a live behavior run into
+    # an evidence run.
+    name = {"behavior": "grid.json"}.get(manifest["gridKind"], f"grid-{manifest['gridKind'].replace('_', '-')}.json")
+    (args.out / name).write_text(json.dumps(manifest, indent=2))
+    print(f"grid: {len(cells)} cells, protocol {PROTOCOL_VERSION}, sha256 {manifest['checksum'][:12]} -> {args.out / name}")
 
 
 if __name__ == "__main__":
