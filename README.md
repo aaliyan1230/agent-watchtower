@@ -39,7 +39,7 @@ Watchtower catches those failures. Three ideas make it work:
    vague "something was wrong". Verdicts are reproducible from the
    same trace forever.
 
-An optional **LLM judge** (Gemini or DeepSeek via Bedrock) can add a
+An optional **LLM judge** (Gemini, DeepSeek, or Kimi via OpenRouter) can add a
 second opinion on top. The experiments show it catches things the
 deterministic checks miss, and they show judges disagree with each
 other. That disagreement is why the deterministic layer is the
@@ -146,12 +146,12 @@ for a trace is then available at `GET /v1/reports/{traceId}`.
 ### Live smoke test (one real model call, needs a key)
 
 ```sh
-cp .env.example .env   # then put GEMINI_API_KEY in it
+cp .env.example .env   # then put OPENROUTER_API_KEY in it
 make live
 ```
 
-Runs one real Gemini agent through the whole pipeline, from tool call
-to judge, and prints the verdict.
+Runs one real Gemini agent (via OpenRouter) through the whole pipeline,
+from tool call to judge, and prints the verdict.
 
 ---
 
@@ -192,19 +192,21 @@ Rerun it yourself:
 ```sh
 make experiment           # offline matrix (free, deterministic)
 make experiment-evidence  # clean behavior with telemetry faults
-make experiment-live      # same matrix on real Gemini (needs GEMINI_API_KEY)
-make experiment-bedrock   # pilot with the DeepSeek judge on Bedrock
+make experiment-live      # live pilot: real Gemini workers + Gemini judge
+make experiment-deepseek  # same pilot with the DeepSeek judge
+make experiment-kimi      # same pilot with the Kimi judge
 make experiment-agreement # judge-vs-judge kappa matrix
 ```
 
 The evidence matrix has 420 cells: clean behavior across complete
-telemetry and 13 telemetry faults (dropped parent, child, tool result,
+telemetry and 13 telemetry conditions (dropped parent, child, tool result,
 attribute, or causal link; duplicate, late, sampled, and reordered
 spans; mismatched tool id; truncated final answer or closure marker; a
-link to a span that never arrived). Every fault except one is 100%
-`INCONCLUSIVE`. Reordered spans are a negative control (PASS), and
-`drop_link` is a known miss: no obligation yet requires a causal link
-to exist, so stripping all links still passes.
+link to a span that never arrived). Reordered spans are a negative
+control and correctly PASS; every one of the other 12 faults is 100%
+`INCONCLUSIVE`.
+Live targets need `OPENROUTER_API_KEY` in `.env`; every live model call
+goes through OpenRouter.
 
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over
@@ -224,7 +226,7 @@ watchtower/            the Go service (module in its own directory)
     ├── ingest/        HTTP ingestion (protobuf or JSON)
     ├── graph/         flat spans -> reconstructed run
     ├── verify/        the deterministic checks + judge interface
-    ├── judge/         LLM judge (Gemini or Bedrock/DeepSeek)
+    ├── judge/         LLM judge (OpenRouter, Gemini direct, or Bedrock)
     ├── bedrock/       minimal SigV4-signed Bedrock client
     └── report/        verdict + evidence bundle + report store
 harness/               Python agents: workers, tools, supervisor,
