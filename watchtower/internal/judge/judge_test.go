@@ -92,3 +92,29 @@ func TestStripFences(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedRunReportsNoUsage(t *testing.T) {
+	fail := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail {
+			w.WriteHeader(504)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"issues\":[]}"}}],"usage":{"prompt_tokens":250,"completion_tokens":1915}}`))
+	}))
+	defer srv.Close()
+	j := New("m", "k", srv.URL)
+	if _, err := j.Run(&graph.Run{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if in, out := j.Usage(); in != 250 || out != 1915 {
+		t.Fatalf("usage = %d/%d, want 250/1915", in, out)
+	}
+	fail = true
+	if _, err := j.Run(&graph.Run{}); err == nil {
+		t.Fatal("want error from 504")
+	}
+	if in, out := j.Usage(); in != 0 || out != 0 {
+		t.Fatalf("failed run usage = %d/%d, want 0/0 (not the previous run's)", in, out)
+	}
+}

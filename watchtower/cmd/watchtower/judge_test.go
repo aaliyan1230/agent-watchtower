@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/report"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/verify"
 )
@@ -89,5 +90,40 @@ func TestBuildJudgeBedrock(t *testing.T) {
 	}
 	if _, err := buildJudge(verify.Config{JudgeCfg: verify.JudgeConfig{Enabled: true, Backend: "nope"}}); err == nil {
 		t.Fatal("unknown backend must fail")
+	}
+}
+
+func TestBuildJudgeOpenRouter(t *testing.T) {
+	var gotAuth, gotModel string
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel = body.Model
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"issues\":[]}"}}]}`))
+	}))
+	defer llmSrv.Close()
+
+	t.Setenv("OPENROUTER_API_KEY", "or-key")
+	cfg := verify.JudgeConfig{Enabled: true, Backend: "openrouter", BaseURL: llmSrv.URL}
+	j, err := buildJudge(verify.Config{JudgeCfg: cfg})
+	if err != nil {
+		t.Fatalf("buildJudge: %v", err)
+	}
+	if m, ok := j.(interface{ Model() string }); !ok || m.Model() != "google/gemini-3.6-flash" {
+		t.Fatalf("default openrouter model = %v", j)
+	}
+	if _, err := j.Run(&graph.Run{TraceID: "t"}); err != nil {
+		t.Fatalf("judge call: %v", err)
+	}
+	if gotAuth != "Bearer or-key" || gotModel != "google/gemini-3.6-flash" {
+		t.Fatalf("auth=%q model=%q", gotAuth, gotModel)
+	}
+
+	t.Setenv("OPENROUTER_API_KEY", "")
+	if _, err := buildJudge(verify.Config{JudgeCfg: cfg}); err == nil {
+		t.Fatal("openrouter judge without a key must fail loudly")
 	}
 }

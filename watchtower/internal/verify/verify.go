@@ -38,6 +38,9 @@ type FindingKind string
 const (
 	FindingViolation   FindingKind = "violation"
 	FindingEvidenceGap FindingKind = "evidence_gap"
+	// FindingJudgeError marks a judge outage, so analysis never counts a
+	// timeout or transport error as the judge's opinion of the run.
+	FindingJudgeError FindingKind = "judge_error"
 )
 
 // Finding is one verifier observation with evidence: the exact span IDs
@@ -60,7 +63,7 @@ type Finding struct {
 // verify only carries the config.
 type JudgeConfig struct {
 	Enabled bool   `json:"enabled"`
-	Backend string `json:"backend"` // "" or "gemini" = OpenAI-compatible, "bedrock" = Amazon Bedrock
+	Backend string `json:"backend"` // "" or "gemini" = Gemini direct, "openrouter" = OpenRouter, "bedrock" = Amazon Bedrock
 	Model   string `json:"model"`   // empty = provider default
 	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
 }
@@ -77,6 +80,7 @@ type EvidenceObligations struct {
 	RequireSupervisorDecision bool `json:"requireSupervisorDecision"`
 	RequireTemporalNesting    bool `json:"requireTemporalNesting"`
 	RequireTraceClosed        bool `json:"requireTraceClosed"`
+	RequireCausalLinks        bool `json:"requireCausalLinks"`
 }
 
 // EvidenceConfig controls the structural and property-specific
@@ -123,6 +127,7 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 		if js, err := cfg.Judge.Run(run); err != nil {
 			out = append(out, Finding{
 				Verifier: cfg.Judge.Name(),
+				Kind:     FindingJudgeError,
 				Severity: SeverityWarning,
 				Message:  "judge failed: " + err.Error(),
 			})

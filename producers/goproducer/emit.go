@@ -47,8 +47,9 @@ func runTrace(endpoint string, variant string) (map[string]any, error) {
 	for _, event := range spec.Events {
 		rootSpan.AddEvent(event.Name, trace.WithAttributes(toKeyValues(event.Attr)...))
 	}
+	emitted := map[string]trace.SpanContext{}
 	for _, child := range spec.Children {
-		emit(ctx, tracer, child)
+		emit(ctx, tracer, child, emitted)
 	}
 	rootSpan.End()
 
@@ -61,14 +62,26 @@ func runTrace(endpoint string, variant string) (map[string]any, error) {
 	return fetchReport(endpoint, traceID)
 }
 
-func emit(ctx context.Context, tracer trace.Tracer, spec *spanSpec) {
-	ctx, span := tracer.Start(ctx, spec.Name)
+// emit starts spans depth-first in declaration order, so a span can only
+// link to one declared (and emitted) before it.
+func emit(ctx context.Context, tracer trace.Tracer, spec *spanSpec, emitted map[string]trace.SpanContext) {
+	var links []trace.Link
+	for _, key := range spec.LinksTo {
+		links = append(links, trace.Link{
+			SpanContext: emitted[key],
+			Attributes:  []attribute.KeyValue{attribute.String("watchtower.link.purpose", "data")},
+		})
+	}
+	ctx, span := tracer.Start(ctx, spec.Name, trace.WithLinks(links...))
+	if spec.Key != "" {
+		emitted[spec.Key] = span.SpanContext()
+	}
 	applyAttrs(span, spec.Attrs)
 	for _, event := range spec.Events {
 		span.AddEvent(event.Name, trace.WithAttributes(toKeyValues(event.Attr)...))
 	}
 	for _, child := range spec.Children {
-		emit(ctx, tracer, child)
+		emit(ctx, tracer, child, emitted)
 	}
 	span.End()
 }

@@ -102,7 +102,7 @@ def label(elements: list[dict], x: float, y: float, w: float, h: float, text: st
     elements.append(el)
 
 
-def arrow(elements: list[dict], x1: float, y1: float, x2: float, y2: float, text: str = "", *, color: str = INK, label_dy: float = 0, bend: float | None = None) -> None:
+def arrow(elements: list[dict], x1: float, y1: float, x2: float, y2: float, text: str = "", *, color: str = INK, label_dy: float = 0, bend: float | None = None, fontSize: int = 14) -> None:
     """Straight arrow, or an L-shaped one when bend is set: the shaft
     runs horizontally to (x1+bend, y1), then vertically to the end."""
     if bend is None:
@@ -123,15 +123,15 @@ def arrow(elements: list[dict], x1: float, y1: float, x2: float, y2: float, text
     elements.append(el)
     if text:
         mx, my = (x1 + x2) / 2, (y1 + y2) / 2 + label_dy
-        tw = len(text) * 14 * 0.52
+        tw = len(text) * fontSize * 0.52
         t = _base(_nid("albl"), "text")
         t.update({
             "x": mx - tw / 2,
-            "y": my - 14,
+            "y": my - fontSize,
             "width": tw,
-            "height": 20,
+            "height": fontSize + 6,
             "text": text,
-            "fontSize": 14,
+            "fontSize": fontSize,
             "fontFamily": 1,
             "textAlign": "center",
             "verticalAlign": "middle",
@@ -183,7 +183,7 @@ def architecture() -> None:
 
 def pipeline() -> None:
     e: list[dict] = []
-    r = box(e, 40, 210, 270, 80, WIRE, "Reconstructed run\nordered steps and budget")
+    r = box(e, 30, 300, 300, 100, WIRE, "Reconstructed run\nordered steps + budget", fontSize=28)
     checks = [
         ("Schema", "output contract"),
         ("Policy", "tool allowlist"),
@@ -192,25 +192,26 @@ def pipeline() -> None:
         ("Status", "span errors"),
         ("Evidence", "identity + obligations"),
     ]
+    positions = [(400, 45), (760, 45), (400, 190), (760, 190), (400, 335), (760, 335)]
     for i, (name, detail) in enumerate(checks):
-        y = 20 + i * 105
-        box(e, 430, y, 280, 75, CORE, f"{name}: {detail}")
-        arrow(e, 310, 250, 430, y + 38)
-        arrow(e, 710, y + 38, 820, 250)
-    j = box(e, 430, 650, 280, 75, JUDGE, "Optional judge\nsemantic review")
-    arrow(e, 310, 250, 430, 688)
-    arrow(e, 710, 688, 820, 250)
-    f = box(e, 820, 205, 300, 90, RESULT, "Finding\nverifier, severity, evidence")
-    m = box(e, 1230, 205, 300, 90, RESULT, "Severity mapping\nhighest finding wins")
-    arrow(e, 1120, 250, 1230, 250)
-    p = box(e, 1660, 50, 260, 70, PASS, "PASS: no findings")
-    w = box(e, 1660, 175, 260, 70, JUDGE, "FLAGGED: warning")
-    inc = box(e, 1660, 300, 260, 70, GAP, "INCONCLUSIVE: gap")
-    fail = box(e, 1660, 425, 260, 70, FAIL, "FAIL: critical")
-    arrow(e, 1530, 250, 1660, 85, "clean", label_dy=-8)
-    arrow(e, 1530, 250, 1660, 210, "warning")
-    arrow(e, 1530, 250, 1660, 335, "evidence gap")
-    arrow(e, 1530, 250, 1660, 460, "critical", label_dy=8)
+        x, y = positions[i]
+        box(e, x, y, 300, 100, CORE, f"{name}: {detail}", fontSize=26)
+        arrow(e, 330, 350, x, y + 50, fontSize=20)
+        arrow(e, x + 300, y + 50, 1090, 350, fontSize=20)
+    j = box(e, 400, 505, 300, 90, JUDGE, "Optional judge\nsemantic review", fontSize=26)
+    arrow(e, 330, 370, 400, 550, fontSize=20)
+    arrow(e, 700, 550, 1090, 370, fontSize=20)
+    f = box(e, 1090, 300, 310, 100, RESULT, "Finding\nverifier, severity,\nspan evidence", fontSize=26)
+    m = box(e, 1460, 300, 310, 100, RESULT, "Severity mapping\nhighest finding wins", fontSize=26)
+    arrow(e, 1400, 350, 1460, 350, fontSize=20)
+    p = box(e, 1090, 520, 310, 78, PASS, "PASS: no findings", fontSize=26)
+    w = box(e, 1460, 520, 310, 78, JUDGE, "FLAGGED: warning", fontSize=26)
+    inc = box(e, 1090, 635, 310, 78, GAP, "INCONCLUSIVE: gap", fontSize=26)
+    fail = box(e, 1460, 635, 310, 78, FAIL, "FAIL: critical", fontSize=26)
+    arrow(e, 1615, 460, 1245, 520, "clean", label_dy=-10, fontSize=20)
+    arrow(e, 1615, 460, 1615, 520, "warning", label_dy=-10, fontSize=20)
+    arrow(e, 1615, 460, 1245, 635, "evidence gap", label_dy=8, fontSize=20)
+    arrow(e, 1615, 460, 1615, 635, "critical", label_dy=8, fontSize=20)
     save("pipeline", e)
 
 

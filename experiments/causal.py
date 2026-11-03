@@ -53,8 +53,10 @@ def _is_closed(span: Mapping) -> bool:
 
 
 def trace_closed(spans: Sequence[Mapping]) -> bool:
-    """True iff any span carries the explicit end-of-trace marker."""
-    return any(_is_closed(s) for s in spans)
+    """True iff a root span carries the explicit end-of-trace marker,
+    matching graph.tracesClosed: a worker's own marker is not proof the
+    supervisor has finished."""
+    return any(_is_closed(s) for s in spans if not s.get("parentSpanId"))
 
 
 def _final_present(spans: Sequence[Mapping]) -> bool:

@@ -22,7 +22,7 @@ func TestCleanSpecCarriesFullContract(t *testing.T) {
 		t.Fatal("clean variant must be known")
 	}
 	root := run.Attrs
-	for _, attr := range []string{agentName, wtCompleted, wtFinal, wtOutput} {
+	for _, attr := range []string{agentName, wtCompleted, wtFinal, wtOutput, wtTraceClosed} {
 		if _, present := root[attr]; !present {
 			t.Errorf("root span missing %s", attr)
 		}
@@ -54,6 +54,7 @@ func TestVariantsOmitExactlyOneRequiredField(t *testing.T) {
 		{"omit-tool-result", "tool.call", toolResultOK},
 		{"omit-tool-id", "tool.call", toolCallID},
 		{"omit-final", "chat", wtFinal},
+		{"omit-closed", "agent.run", wtTraceClosed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.variant, func(t *testing.T) {
@@ -72,4 +73,28 @@ func TestUnknownVariantRejected(t *testing.T) {
 	if _, ok := buildSpec("nonsense"); ok {
 		t.Fatal("unknown variant must not build a spec")
 	}
+}
+
+func TestAnswerTurnLinksToConsumedTool(t *testing.T) {
+	answerTurn := func(run *spanSpec) *spanSpec { return run.Children[1] }
+	clean, _ := buildSpec("clean")
+	if got := answerTurn(clean).LinksTo; len(got) != 1 || got[0] != lookupSpec(clean, "tool.call").Key {
+		t.Fatalf("clean answer turn links = %v, want the tool span", got)
+	}
+	omitted, _ := buildSpec("omit-link")
+	if got := answerTurn(omitted).LinksTo; len(got) != 0 {
+		t.Fatalf("omit-link answer turn links = %v, want none", got)
+	}
+}
+
+func lookupSpec(spec *spanSpec, name string) *spanSpec {
+	if spec.Name == name {
+		return spec
+	}
+	for _, child := range spec.Children {
+		if found := lookupSpec(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
 }

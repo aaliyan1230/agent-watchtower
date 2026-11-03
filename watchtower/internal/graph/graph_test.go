@@ -247,27 +247,46 @@ func TestReconstructSiblingOrderByTime(t *testing.T) {
 }
 
 func TestReconstructClosedMarker(t *testing.T) {
-	base := syntheticTrace()
-	run, err := Reconstruct(base)
-	if err != nil {
-		t.Fatalf("Reconstruct: %v", err)
+	tests := []struct {
+		name    string
+		stamped []string
+		drop    string
+		want    bool
+	}{
+		{name: "no marker", want: false},
+		{name: "marker on root", stamped: []string{"s0"}, want: true},
+		// A worker that finished early stamps its own span while the
+		// supervisor may still be running: not proof the trace is complete.
+		{name: "marker only on a non-root span", stamped: []string{"s5"}, want: false},
+		{name: "marker on root and leaf", stamped: []string{"s0", "s5"}, want: true},
+		{name: "root dropped, orphan carries marker", stamped: []string{"s1"}, drop: "s0", want: false},
 	}
-	if run.Closed {
-		t.Fatal("clean trace without a closure marker must not be closed")
-	}
-
-	stamped := syntheticTrace()
-	for i := range stamped {
-		if stamped[i].SpanID == "s5" {
-			stamped[i].Attributes = map[string]string{model.WatchtowerTraceClosed: "true"}
-		}
-	}
-	run, err = Reconstruct(stamped)
-	if err != nil {
-		t.Fatalf("Reconstruct: %v", err)
-	}
-	if !run.Closed {
-		t.Fatal("trace with a closure marker on the last span must be closed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var spans []model.Span
+			for _, s := range syntheticTrace() {
+				if s.SpanID == tt.drop {
+					continue
+				}
+				for _, id := range tt.stamped {
+					if s.SpanID == id {
+						attrs := map[string]string{model.WatchtowerTraceClosed: "true"}
+						for k, v := range s.Attributes {
+							attrs[k] = v
+						}
+						s.Attributes = attrs
+					}
+				}
+				spans = append(spans, s)
+			}
+			run, err := Reconstruct(spans)
+			if err != nil {
+				t.Fatalf("Reconstruct: %v", err)
+			}
+			if run.Closed != tt.want {
+				t.Fatalf("Closed = %v, want %v", run.Closed, tt.want)
+			}
+		})
 	}
 }
 
