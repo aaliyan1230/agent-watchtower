@@ -181,11 +181,11 @@ schema_violation          0%     0%      0%     100%       0%
 
 Each fault type is caught by exactly the check designed for it. The
 LLM judge adds a second opinion. On 210 live runs it agreed with the
-deterministic verdicts at κ ≈ 0.73, missed some faults (loop 50%,
-schema 90%), and cost about $0.12 for the whole matrix (~$0.0006 per
-run, measured tokens). Three different judges (Gemini, DeepSeek,
-Kimi) disagree with each other surprisingly often, which is exactly
-why the deterministic checks stay the foundation.
+deterministic verdicts at κ = 0.65, missed some faults (it caught
+loop 43%, schema 77%), and cost about $0.12 for the whole matrix
+(~$0.0006 per run, measured tokens). In small pilots, three different
+judges (Gemini, DeepSeek, Kimi) agreed with each other only partially,
+which is exactly why the deterministic checks stay the foundation.
 
 Rerun it yourself:
 
@@ -197,12 +197,14 @@ make experiment-bedrock   # pilot with the DeepSeek judge on Bedrock
 make experiment-agreement # judge-vs-judge kappa matrix
 ```
 
-The evidence matrix has 270 cells: clean behavior across complete,
-dropped-parent, dropped-child, dropped-tool-result, duplicate-span,
-late-span, mismatched-tool-id, truncated-final, and reordered-span
-telemetry. It reports false assurance and the rate of `INCONCLUSIVE`
-outcomes; reordered spans are a negative control because reconstruction
-should tolerate them.
+The evidence matrix has 420 cells: clean behavior across complete
+telemetry and 13 telemetry faults (dropped parent, child, tool result,
+attribute, or causal link; duplicate, late, sampled, and reordered
+spans; mismatched tool id; truncated final answer or closure marker; a
+link to a span that never arrived). Every fault except one is 100%
+`INCONCLUSIVE`. Reordered spans are a negative control (PASS), and
+`drop_link` is a known miss: no obligation yet requires a causal link
+to exist, so stripping all links still passes.
 
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over

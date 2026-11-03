@@ -11,6 +11,22 @@ no UNKNOWN constant. This removes a four-way branch the judge/verifier did
 not actually need and keeps "evidence missing" (abstain) distinct from
 "evidence wrong" (fail) in every table below.
 
+Provenance caveats (audit, 3 Nov 2026)
+--------------------------------------
+- Metrics 1-3 and 5 come from experiments.causal.deterministic_verdict, a
+  Python reference that checks closure and dangling ids by set membership.
+  That function cannot depend on span order, so flip_rate = 0 holds by
+  construction; it is a consistency check of the sweep, not evidence that
+  the Go pipeline is order-invariant. The Go canonical package is not yet
+  wired into verify, and the grid traces are synthetic, not harness runs.
+- The reference diverges from Go on one case: a closed trace with no final
+  answer is FAIL here but INCONCLUSIVE (final_answer evidence gap) in Go.
+- Metric 4 is a deterministic estimate scaled by DAG size, not a measured
+  token count or wall-clock time.
+- The live judge section below has no backing artifact: no
+  results-causal-judge-*.json exists. Treat those numbers as unreproduced
+  until `make experiment-causal-judge` is re-run.
+
 Grid
 ----
 Offline grid: 40 distinct seeded executions (seeds 1..40 alternating the
@@ -39,7 +55,7 @@ Metric definitions and current values (offline grid, results-causal.json)
    Current:
      drop_link          0.00   <- KNOWN TRUE MISS: removing a causal link
                                   is invisible to the dangling-target check;
-                                  see LIMITATIONS / SESSION notes.
+                                  no obligation requires a link to exist.
      orphan_link_target 1.00
      truncate_closed    1.00
 
