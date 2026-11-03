@@ -39,8 +39,8 @@ Watchtower catches those failures. Three ideas make it work:
    vague "something was wrong". Verdicts are reproducible from the
    same trace forever.
 
-An optional **LLM judge** (Gemini, DeepSeek, or Kimi via OpenRouter) can add a
-second opinion on top. The experiments show it catches things the
+An optional **LLM judge** (Gemini via the Gemini API, or DeepSeek or
+Kimi via OpenRouter) can add a second opinion on top. The experiments show it catches things the
 deterministic checks miss, and they show judges disagree with each
 other. That disagreement is why the deterministic layer is the
 backbone.
@@ -146,12 +146,12 @@ for a trace is then available at `GET /v1/reports/{traceId}`.
 ### Live smoke test (one real model call, needs a key)
 
 ```sh
-cp .env.example .env   # then put OPENROUTER_API_KEY in it
+cp .env.example .env   # then put GEMINI_API_KEY in it
 make live
 ```
 
-Runs one real Gemini agent (via OpenRouter) through the whole pipeline,
-from tool call to judge, and prints the verdict.
+Runs one real Gemini agent through the whole pipeline, from tool call
+to judge, and prints the verdict.
 
 ---
 
@@ -163,8 +163,8 @@ control runs, 210 cells, each through the real pipeline.
 
 ![Experiment flow: seeded fault matrix through the real telemetry pipeline into reproducible analysis artifacts](assets/diagrams/experiment.png)
 
-Current results (offline, fully deterministic, and confirmed live
-with real Gemini runs):
+Current results (offline, fully deterministic, and reproduced live on
+all 210 cells with real Gemini workers):
 
 ```
 overall detection: 100%   false positives (clean runs): 0%
@@ -180,12 +180,14 @@ schema_violation          0%     0%      0%     100%       0%
 ```
 
 Each fault type is caught by exactly the check designed for it. The
-LLM judge adds a second opinion. On 210 live runs it agreed with the
-deterministic verdicts at κ = 0.65, missed some faults (it caught
-loop 43%, schema 77%), and cost about $0.12 for the whole matrix
-(~$0.0006 per run, measured tokens). In small pilots, three different
-judges (Gemini, DeepSeek, Kimi) agreed with each other only partially,
-which is exactly why the deterministic checks stay the foundation.
+LLM judge (gemini-3.8-flash) adds a second opinion. On the 210 live
+runs it agreed with the deterministic verdicts at κ = 0.64, missed
+some faults (it caught loop 23%, schema 93%), and cost about $0.07 for
+the whole matrix (~$0.0003 per run, measured tokens). Three judge
+families (gemini-3.8-flash, deepseek-v4.1-flash, kimi-k3) agree with
+each other only partially, and each changes its verdict on 38-57% of
+traces when the same facts are merely laid out differently, which is
+exactly why the deterministic checks stay the foundation.
 
 Rerun it yourself:
 
@@ -205,8 +207,10 @@ spans; mismatched tool id; truncated final answer or closure marker; a
 link to a span that never arrived). Reordered spans are a negative
 control and correctly PASS; every one of the other 12 faults is 100%
 `INCONCLUSIVE`.
-Live targets need `OPENROUTER_API_KEY` in `.env`; every live model call
-goes through OpenRouter.
+The same 420 cells run live with real workers give the same result:
+0% false assurance. Live targets call Gemini models through the
+Gemini API (`GEMINI_API_KEY`) and DeepSeek and Kimi through OpenRouter
+(`OPENROUTER_API_KEY`), each judge at its minimum reasoning setting.
 
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over
@@ -226,7 +230,7 @@ watchtower/            the Go service (module in its own directory)
     ├── ingest/        HTTP ingestion (protobuf or JSON)
     ├── graph/         flat spans -> reconstructed run
     ├── verify/        the deterministic checks + judge interface
-    ├── judge/         LLM judge (OpenRouter, Gemini direct, or Bedrock)
+    ├── judge/         LLM judge (Gemini API, OpenRouter, or Bedrock)
     ├── bedrock/       minimal SigV4-signed Bedrock client
     └── report/        verdict + evidence bundle + report store
 harness/               Python agents: workers, tools, supervisor,

@@ -26,5 +26,5 @@
       "requireCausalLinks": true
     }
   },
-  "judge": { "enabled": true, "backend": "openrouter", "model": "moonshotai/kimi-k2.5" }
+  "judge": { "enabled": true, "backend": "openrouter", "model": "moonshotai/kimi-k3", "reasoning": "off" }
 }

@@ -1,6 +1,6 @@
-"""Live smoke test: one real Gemini run (via OpenRouter) through the full pipeline.
+"""Live smoke test: one real Gemini run through the full pipeline.
 
-Requires OPENROUTER_API_KEY in .env (fails loudly otherwise). Spawns the
+Requires GEMINI_API_KEY in .env (fails loudly otherwise). Spawns the
 Go server with the LLM judge enabled, runs a worker that must use a
 tool to answer, and prints the verdict plus judge findings.
 
@@ -10,7 +10,7 @@ Run: .venv/bin/python -m harness.live_smoke
 from __future__ import annotations
 
 from harness.env import get_api_key
-from harness.providers import OpenRouterProvider
+from harness.providers import GeminiProvider
 from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
@@ -22,15 +22,15 @@ CONFIG = str(REPO_ROOT / "watchtower" / "testdata" / "judge_config.json")
 
 
 def main() -> None:
-    api_key = get_api_key("OPENROUTER_API_KEY")
+    api_key = get_api_key("GEMINI_API_KEY")
     if not api_key:
-        raise SystemExit("OPENROUTER_API_KEY missing: add it to .env (see .env.example)")
-    print("openrouter key present; spawning watchtower serve with judge enabled")
+        raise SystemExit("GEMINI_API_KEY missing: add it to .env (see .env.example)")
+    print("gemini key present; spawning watchtower serve with judge enabled")
 
-    proc = spawn_server(ENDPOINT, ADDR, CONFIG, env={"OPENROUTER_API_KEY": api_key})
+    proc = spawn_server(ENDPOINT, ADDR, CONFIG, env={"GEMINI_API_KEY": api_key})
     try:
         telemetry = HarnessTelemetry(ENDPOINT, service_name="live-smoke")
-        provider = OpenRouterProvider(api_key=api_key)
+        provider = GeminiProvider(api_key=api_key, reasoning="low")
         add_tool = Tool("add", "add two numbers", {"a": {"type": "integer"}, "b": {"type": "integer"}}, lambda a, b: a + b)
         worker = Worker(
             "smoke-worker",

@@ -66,6 +66,10 @@ type JudgeConfig struct {
 	Backend string `json:"backend"` // "" or "gemini" = Gemini direct, "openrouter" = OpenRouter, "bedrock" = Amazon Bedrock
 	Model   string `json:"model"`   // empty = provider default
 	BaseURL string `json:"baseUrl"` // OpenAI-compatible override (tests / alternate endpoints)
+	// Reasoning is the judge's reasoning level ("off", "minimal", "low",
+	// "medium", "high"; "" = model default). Vendors disagree on what a
+	// level costs, so configs pin each model's minimum explicitly.
+	Reasoning string `json:"reasoning"`
 }
 
 // EvidenceObligations declares the minimum trace facts needed before a

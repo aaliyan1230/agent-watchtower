@@ -22,7 +22,7 @@ func TestChatJSONRoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("gemini-2.5-flash", "key", srv.URL)
+	c := New("gemini-2.5-flash", "key", srv.URL, map[string]any{"reasoning_effort": "low"})
 	var out struct {
 		Verdict string `json:"verdict"`
 	}
@@ -46,6 +46,9 @@ func TestChatJSONRoundTrip(t *testing.T) {
 	if gotBody["temperature"].(float64) != 0 {
 		t.Errorf("temperature = %v", gotBody["temperature"])
 	}
+	if gotBody["reasoning_effort"] != "low" {
+		t.Errorf("extra field not merged: %v", gotBody)
+	}
 }
 
 func TestChatJSONErrors(t *testing.T) {
@@ -67,7 +70,7 @@ func TestChatJSONErrors(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer srv.Close()
-			c := New("m", "k", srv.URL)
+			c := New("m", "k", srv.URL, nil)
 			_, err := c.ChatText(context.Background(), "s", "u")
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)

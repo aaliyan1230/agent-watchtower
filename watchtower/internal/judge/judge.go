@@ -34,9 +34,10 @@ type LLM struct {
 	lastOut int64
 }
 
-// New builds a judge over an OpenAI-compatible endpoint (Gemini).
-func New(model, apiKey, baseURL string) *LLM {
-	return &LLM{client: llm.New(model, apiKey, baseURL), model: model}
+// New builds a judge over an OpenAI-compatible endpoint (Gemini direct
+// or OpenRouter); extra holds endpoint-specific request fields.
+func New(model, apiKey, baseURL string, extra map[string]any) *LLM {
+	return &LLM{client: llm.New(model, apiKey, baseURL, extra), model: model}
 }
 
 // NewBedrock builds a judge over Amazon Bedrock's native API.

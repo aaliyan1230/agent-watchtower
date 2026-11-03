@@ -26,5 +26,5 @@
       "requireCausalLinks": true
     }
   },
-  "judge": { "enabled": true, "backend": "openrouter", "model": "google/gemini-3.6-flash" }
+  "judge": { "enabled": true, "backend": "gemini", "model": "gemini-3.8-flash", "reasoning": "low" }
 }

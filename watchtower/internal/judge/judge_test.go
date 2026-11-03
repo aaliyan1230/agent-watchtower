@@ -26,7 +26,7 @@ func runnable(t *testing.T, modelOutput string) (*LLM, *graph.Run) {
 		},
 		Budget: graph.Budget{SpanCount: 3, TotalTokens: 40, DurationMs: 100},
 	}
-	return New("gemini-2.5-flash", "key", srv.URL), run
+	return New("gemini-2.5-flash", "key", srv.URL, nil), run
 }
 
 func TestRunMapsIssuesToFindings(t *testing.T) {
@@ -62,7 +62,7 @@ func TestRunServerErrorSurfaces(t *testing.T) {
 		w.WriteHeader(500)
 	}))
 	defer srv.Close()
-	j := New("m", "k", srv.URL)
+	j := New("m", "k", srv.URL, nil)
 	if _, err := j.Run(&graph.Run{}); err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("err = %v, want 500", err)
 	}
@@ -103,7 +103,7 @@ func TestFailedRunReportsNoUsage(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"issues\":[]}"}}],"usage":{"prompt_tokens":250,"completion_tokens":1915}}`))
 	}))
 	defer srv.Close()
-	j := New("m", "k", srv.URL)
+	j := New("m", "k", srv.URL, nil)
 	if _, err := j.Run(&graph.Run{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
