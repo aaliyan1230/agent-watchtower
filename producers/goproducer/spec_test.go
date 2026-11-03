@@ -74,3 +74,27 @@ func TestUnknownVariantRejected(t *testing.T) {
 		t.Fatal("unknown variant must not build a spec")
 	}
 }
+
+func TestAnswerTurnLinksToConsumedTool(t *testing.T) {
+	answerTurn := func(run *spanSpec) *spanSpec { return run.Children[1] }
+	clean, _ := buildSpec("clean")
+	if got := answerTurn(clean).LinksTo; len(got) != 1 || got[0] != lookupSpec(clean, "tool.call").Key {
+		t.Fatalf("clean answer turn links = %v, want the tool span", got)
+	}
+	omitted, _ := buildSpec("omit-link")
+	if got := answerTurn(omitted).LinksTo; len(got) != 0 {
+		t.Fatalf("omit-link answer turn links = %v, want none", got)
+	}
+}
+
+func lookupSpec(spec *spanSpec, name string) *spanSpec {
+	if spec.Name == name {
+		return spec
+	}
+	for _, child := range spec.Children {
+		if found := lookupSpec(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
+}

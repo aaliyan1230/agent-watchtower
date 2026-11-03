@@ -22,11 +22,11 @@ const defaultEndpoint = "http://127.0.0.1:4318"
 
 func main() {
 	endpoint := flag.String("endpoint", defaultEndpoint, "watchtower serve base URL")
-	variant := flag.String("variant", "clean", "trace variant: clean, omit-genai-system, omit-tool-result, omit-tool-id, omit-final, omit-closed")
+	variant := flag.String("variant", "clean", "trace variant: clean, omit-genai-system, omit-tool-result, omit-tool-id, omit-final, omit-closed, omit-link")
 	flag.Parse()
 
 	if _, ok := buildSpec(*variant); !ok {
-		log.Fatalf("unknown variant %q (want one of clean, omit-genai-system, omit-tool-result, omit-tool-id, omit-final, omit-closed)", *variant)
+		log.Fatalf("unknown variant %q (want one of clean, omit-genai-system, omit-tool-result, omit-tool-id, omit-final, omit-closed, omit-link)", *variant)
 	}
 	report, err := runTrace(*endpoint, *variant)
 	if err != nil {

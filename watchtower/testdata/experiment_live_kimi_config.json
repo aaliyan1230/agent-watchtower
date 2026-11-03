@@ -22,7 +22,8 @@
       "requireFinalAnswer": true,
       "requireSupervisorDecision": true,
       "requireTemporalNesting": true,
-      "requireTraceClosed": true
+      "requireTraceClosed": true,
+      "requireCausalLinks": true
     }
   },
   "judge": { "enabled": true, "backend": "openrouter", "model": "moonshotai/kimi-k2.5" }

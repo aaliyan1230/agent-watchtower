@@ -31,6 +31,8 @@ const (
 
 type spanSpec struct {
 	Name     string
+	Key      string // stable handle other specs link to
+	LinksTo  []string
 	Attrs    map[string]any
 	Events   []eventSpec
 	Children []*spanSpec
@@ -46,7 +48,7 @@ type eventSpec struct {
 // structurally identical — only the required evidence differs.
 func buildSpec(variant string) (*spanSpec, bool) {
 	switch variant {
-	case "clean", "omit-genai-system", "omit-tool-result", "omit-tool-id", "omit-final", "omit-closed":
+	case "clean", "omit-genai-system", "omit-tool-result", "omit-tool-id", "omit-final", "omit-closed", "omit-link":
 		return buildRun(variant), true
 	default:
 		return nil, false
@@ -89,6 +91,7 @@ func buildRun(variant string) *spanSpec {
 	}
 	toolCall := &spanSpec{
 		Name: "tool.call",
+		Key:  "tool",
 		Attrs: map[string]any{
 			toolName:   "search",
 			agentName:  "worker-go",
@@ -120,6 +123,11 @@ func buildRun(variant string) *spanSpec {
 	}
 	if variant != "omit-genai-system" {
 		finalTurn.Attrs[genAISystem] = "gofake"
+	}
+	if variant != "omit-link" {
+		// The answer turn consumed the tool result; the causal_links
+		// claim needs that dependency on the wire.
+		finalTurn.LinksTo = []string{"tool"}
 	}
 	if variant != "omit-final" {
 		finalTurn.Attrs[wtFinal] = true
