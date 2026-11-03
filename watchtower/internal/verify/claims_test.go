@@ -65,10 +65,12 @@ func TestObligationsMapToClaims(t *testing.T) {
 		RequireSupervisorDecision: true,
 		RequireTemporalNesting:    true,
 		RequireTraceClosed:        true,
+		RequireCausalLinks:        true,
 	}
 	want := []string{
 		"run_root", "agent_completion", "model_correlation", "tool_pairing",
 		"final_answer", "supervisor_decision", "temporal_nesting", "trace_integrity", "trace_closed",
+		"causal_links",
 	}
 	claims := all.Claims()
 	if len(claims) != len(want) {
@@ -128,5 +130,42 @@ func TestTraceClosedObligation(t *testing.T) {
 	closed := &graph.Run{RootSpanID: "s0", Closed: true, Steps: unclosed.Steps}
 	if findings := CheckEvidence(closed, EvidenceObligations{RequireTraceClosed: true}); len(findings) != 0 {
 		t.Fatalf("closed run findings = %+v, want none", findings)
+	}
+}
+
+func TestCausalLinksObligation(t *testing.T) {
+	at := func(sec int) time.Time { return time.Unix(int64(100+sec), 0).UTC() }
+	agent := graph.Step{SpanID: "a", Kind: graph.StepAgent, Name: "agent.run", StartTime: at(0), EndTime: at(10)}
+	ask := graph.Step{SpanID: "c1", ParentID: "a", Kind: graph.StepLLM, StartTime: at(1), EndTime: at(2)}
+	siblingTool := graph.Step{SpanID: "t1", ParentID: "a", Kind: graph.StepTool, StartTime: at(3), EndTime: at(4)}
+	childTool := graph.Step{SpanID: "t1", ParentID: "c1", Kind: graph.StepTool, StartTime: at(1), EndTime: at(2)}
+	answer := graph.Step{SpanID: "c2", ParentID: "a", Kind: graph.StepLLM, StartTime: at(5), EndTime: at(6)}
+	consumed := []graph.CausalEdge{{From: "t1", To: "c2", Purpose: "data"}}
+
+	tests := []struct {
+		name  string
+		steps []graph.Step
+		edges []graph.CausalEdge
+		gaps  int
+	}{
+		{"sibling tool linked from next turn", []graph.Step{agent, ask, siblingTool, answer}, consumed, 0},
+		{"sibling tool consumed without a link", []graph.Step{agent, ask, siblingTool, answer}, nil, 1},
+		{"child tool consumed without a link", []graph.Step{agent, ask, childTool, answer}, nil, 1},
+		{"child tool linked from next turn", []graph.Step{agent, ask, childTool, answer}, consumed, 0},
+		{"no later turn, nothing consumed", []graph.Step{agent, ask, siblingTool}, nil, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := &graph.Run{RootSpanID: "a", Steps: tt.steps, CausalEdges: tt.edges}
+			findings := CheckEvidence(run, EvidenceObligations{RequireCausalLinks: true})
+			if len(findings) != tt.gaps {
+				t.Fatalf("findings = %+v, want %d gaps", findings, tt.gaps)
+			}
+			for _, f := range findings {
+				if f.Claim != "causal_links" || f.Kind != FindingEvidenceGap || len(f.SpanIDs) != 2 {
+					t.Fatalf("finding = %+v", f)
+				}
+			}
+		})
 	}
 }

@@ -77,6 +77,7 @@ type EvidenceObligations struct {
 	RequireSupervisorDecision bool `json:"requireSupervisorDecision"`
 	RequireTemporalNesting    bool `json:"requireTemporalNesting"`
 	RequireTraceClosed        bool `json:"requireTraceClosed"`
+	RequireCausalLinks        bool `json:"requireCausalLinks"`
 }
 
 // EvidenceConfig controls the structural and property-specific
