@@ -7,11 +7,12 @@ three comparator renderings of the *same trace* — ordinary text
 (arrival order), timestamp-sorted, and canonical DAG. That is the
 "verifier order-sensitivity" number the CausalTrace plan owes the paper.
 
-Three judge families, chosen to be independent, all reached through
-harness.providers.OpenRouterProvider (one key, OpenAI-compatible):
-  - gemini   -> google/gemini-3.5-flash-lite
-  - deepseek -> deepseek/deepseek-v3.2
-  - kimi     -> moonshotai/kimi-k2.5
+Three judge families, chosen to be independent and priced mid-tier
+(no flagship "pro" models), each at its minimum reasoning setting:
+  - gemini   -> gemini-3.8-flash via the Gemini API (reasoning low; it
+                cannot be turned off)
+  - deepseek -> deepseek/deepseek-v4.1-flash-1017 via OpenRouter (off)
+  - kimi     -> moonshotai/kimi-k3 via OpenRouter (off)
 
 Offline CI stays green: every real client is injected in tests via a
 mock HTTP transport, and FakeCausalJudge exercises the driver without
@@ -35,16 +36,16 @@ from typing import Protocol, Sequence
 
 import httpx
 
-from harness.providers import OpenRouterProvider
+from harness.providers import ChatCompletionsProvider, GeminiProvider, OpenRouterProvider
 
 from .causal_run import CAUSAL_PROTOCOL
 from .suite import PROTOCOL_VERSION
 
 RENDERINGS = ("text", "time_sorted", "canonical")
-FAMILY_MODELS = {
-    "gemini": "google/gemini-3.5-flash-lite",
-    "deepseek": "deepseek/deepseek-v3.2",
-    "kimi": "moonshotai/kimi-k2.5",
+FAMILIES: dict[str, tuple[type[ChatCompletionsProvider], str, str]] = {
+    "gemini": (GeminiProvider, "gemini-3.8-flash", "low"),
+    "deepseek": (OpenRouterProvider, "deepseek/deepseek-v4.1-flash-1017", "off"),
+    "kimi": (OpenRouterProvider, "moonshotai/kimi-k3", "off"),
 }
 
 SYSTEM = (
@@ -116,10 +117,11 @@ class FakeCausalJudge:
 
 
 class ChatCausalJudge:
-    def __init__(self, provider: OpenRouterProvider, name: str):
+    def __init__(self, provider: ChatCompletionsProvider, name: str):
         self._provider = provider
         self.name = name
         self.model = provider.model
+        self.reasoning = provider.reasoning
 
     def judge(self, render: str) -> tuple[str, dict]:
         start = time.monotonic()
@@ -141,10 +143,12 @@ def make_judge(
     """Build a live judge for one family. The key comes from .env and a
     missing key fails loudly. ``base_url`` / ``http`` let tests point the
     client at a mock transport without any network."""
-    if name not in FAMILY_MODELS:
-        raise ValueError(f"unknown judge {name!r}; expected {'|'.join(FAMILY_MODELS)}")
-    provider = OpenRouterProvider(
-        model=model or FAMILY_MODELS[name],
+    if name not in FAMILIES:
+        raise ValueError(f"unknown judge {name!r}; expected {'|'.join(FAMILIES)}")
+    cls, default_model, reasoning = FAMILIES[name]
+    provider = cls(
+        model=model or default_model,
+        reasoning=reasoning,
         api_key=None,  # None -> read from .env
         base_url=base_url,
         client=http,
@@ -208,7 +212,7 @@ def main() -> None:
         "--results", type=Path, default=Path("artifacts/results-causal.json")
     )
     parser.add_argument(
-        "--judge", choices=list(FAMILY_MODELS), default="gemini"
+        "--judge", choices=list(FAMILIES), default="gemini"
     )
     parser.add_argument(
         "--model", type=str, default="", help="override the family default"
@@ -242,6 +246,7 @@ def main() -> None:
         "causalProtocol": CAUSAL_PROTOCOL,
         "judge": judge.name,
         "model": judge.model,
+        "reasoning": getattr(judge, "reasoning", None),
         "renderings": list(render_keys),
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sourceChecksum": artifact.get("checksum", ""),

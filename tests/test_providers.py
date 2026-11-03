@@ -2,6 +2,8 @@
 transport: request shape, response parsing, error handling — no live
 network involved."""
 
+import json
+
 import httpx
 import pytest
 
@@ -111,7 +113,7 @@ def test_openrouter_provider_defaults(monkeypatch):
     p = OpenRouterProvider(client=httpx.Client(transport=httpx.MockTransport(handler)))
     resp = p.chat([{"role": "user", "content": "hi"}])
     assert seen == {"url": "https://openrouter.ai/api/v1/chat/completions", "auth": "Bearer or-key"}
-    assert p.model == "google/gemini-3.5-flash-lite"
+    assert p.model == "deepseek/deepseek-v4.1-flash-1017"
     assert resp.system == "openrouter"
 
 
@@ -132,3 +134,26 @@ def test_transport_error_retried_once():
 
     resp = make_provider(handler).chat([{"role": "user", "content": "hi"}])
     assert resp.content == "ok" and calls["n"] == 2
+
+
+@pytest.mark.parametrize(
+    "cls, level, fields",
+    [
+        (GeminiProvider, "low", {"reasoning_effort": "low"}),
+        (GeminiProvider, "off", {"reasoning_effort": "none"}),
+        (OpenRouterProvider, "off", {"reasoning": {"enabled": False}}),
+        (OpenRouterProvider, "high", {"reasoning": {"effort": "high"}}),
+        (OpenRouterProvider, None, {}),
+    ],
+)
+def test_reasoning_level_maps_to_each_wire_format(cls, level, fields):
+    seen = {}
+
+    def handler(request):
+        body = json.loads(request.read())
+        seen.update({k: body[k] for k in ("reasoning", "reasoning_effort") if k in body})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    p = cls(api_key="k", base_url="http://mock", client=httpx.Client(transport=httpx.MockTransport(handler)), reasoning=level)
+    p.chat([{"role": "user", "content": "x"}])
+    assert seen == fields

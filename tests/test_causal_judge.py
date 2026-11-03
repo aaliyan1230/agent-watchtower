@@ -1,6 +1,8 @@
 """CausalTrace live judge: verdict parsing, the driver loop, and the
 provider wiring — all offline via mocked HTTP transports."""
 
+import json
+
 import httpx
 import pytest
 
@@ -108,30 +110,44 @@ def _completion(content):
     )
 
 
-@pytest.mark.parametrize("family", ["gemini", "deepseek", "kimi"])
-def test_make_judge_family_rides_openrouter(monkeypatch, family):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+@pytest.mark.parametrize(
+    "family, key_env, reasoning",
+    [
+        ("gemini", "GEMINI_API_KEY", {"reasoning_effort": "low"}),
+        ("deepseek", "OPENROUTER_API_KEY", {"reasoning": {"enabled": False}}),
+        ("kimi", "OPENROUTER_API_KEY", {"reasoning": {"enabled": False}}),
+    ],
+)
+def test_make_judge_family_route_and_reasoning(monkeypatch, family, key_env, reasoning):
+    monkeypatch.setenv(key_env, "test-key")
     seen = {}
 
     def handler(request):
+        body = json.loads(request.read())
         seen["url"] = str(request.url)
         seen["auth"] = request.headers["authorization"]
-        seen["model"] = __import__("json").loads(request.read())["model"]
+        seen["model"] = body["model"]
+        seen["reasoning"] = {k: body[k] for k in ("reasoning", "reasoning_effort") if k in body}
         return _completion('{"verdict": "INCONCLUSIVE"}')
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
     judge = make_judge(family, base_url="http://mock", http=http)
     verdict, usage = judge.judge("a rendering")
-    assert judge.name == family
-    assert judge.model == cj.FAMILY_MODELS[family]
-    assert seen == {"url": "http://mock/chat/completions", "auth": "Bearer test-key", "model": cj.FAMILY_MODELS[family]}
+    model = cj.FAMILIES[family][1]
+    assert judge.name == family and judge.model == model
+    assert seen == {
+        "url": "http://mock/chat/completions",
+        "auth": "Bearer test-key",
+        "model": model,
+        "reasoning": reasoning,
+    }
     assert verdict == "INCONCLUSIVE"
     assert usage["inputTokens"] == 7
     assert usage["outputTokens"] == 2
 
 
 def test_make_judge_model_override(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     http = httpx.Client(transport=httpx.MockTransport(lambda r: _completion("PASS")))
     assert make_judge("gemini", model="test-model", base_url="http://mock", http=http).model == "test-model"
 

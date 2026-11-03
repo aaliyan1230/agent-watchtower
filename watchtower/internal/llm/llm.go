@@ -27,6 +27,7 @@ type Client struct {
 	baseURL string
 	model   string
 	http    *http.Client
+	extra   map[string]any
 	lastIn  int64
 	lastOut int64
 }
@@ -35,7 +36,9 @@ type Client struct {
 // judge cost is a paper metric, so it is measured, not estimated.
 func (c *Client) LastUsage() (int64, int64) { return c.lastIn, c.lastOut }
 
-func New(model, apiKey, baseURL string) *Client {
+// New builds a client; extra carries endpoint-specific request fields
+// (reasoning controls differ per vendor) merged into every request body.
+func New(model, apiKey, baseURL string, extra map[string]any) *Client {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -45,7 +48,8 @@ func New(model, apiKey, baseURL string) *Client {
 		model:   model,
 		// Reasoning judges (Kimi) emit ~2k tokens per verdict; 60s cut
 		// them off mid-answer on live runs.
-		http: &http.Client{Timeout: 180 * time.Second},
+		http:  &http.Client{Timeout: 180 * time.Second},
+		extra: extra,
 	}
 }
 
@@ -54,7 +58,7 @@ func New(model, apiKey, baseURL string) *Client {
 // the text as JSON is the caller's job (judge), so fence-wrapping and
 // parsing quirks live in one place.
 func (c *Client) ChatText(ctx context.Context, system, user string) (string, error) {
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"model": c.model,
 		"messages": []Message{
 			{Role: "system", Content: system},
@@ -62,7 +66,11 @@ func (c *Client) ChatText(ctx context.Context, system, user string) (string, err
 		},
 		"response_format": map[string]string{"type": "json_object"},
 		"temperature":     0,
-	})
+	}
+	for k, v := range c.extra {
+		payload[k] = v
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}

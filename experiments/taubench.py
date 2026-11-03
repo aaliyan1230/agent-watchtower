@@ -29,7 +29,7 @@ from benchmarks.taubench import env
 
 from harness.env import get_api_key
 from harness.faults import FaultInjector, FaultKind, FaultSpec
-from harness.providers import OpenRouterProvider
+from harness.providers import GeminiProvider
 from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
@@ -41,7 +41,8 @@ ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
 CONFIG = str(REPO_ROOT / "watchtower" / "testdata" / "taubench_config.json")
 TASKS_PATH = REPO_ROOT / "benchmarks" / "taubench" / "tasks_subset.json"
-WORKER_MODEL = "google/gemini-3.5-flash-lite"
+WORKER_MODEL = "gemini-3.5-flash-lite"
+WORKER_REASONING = "low"
 
 ALLOWED = [
     "find_user_id_by_name_zip",
@@ -87,7 +88,7 @@ def harness_tools(data: dict[str, Any]) -> list[Tool]:
 
 def run_task(idx: int, task: env.Task, condition: str, seed: int, trace_dir: str | None) -> dict[str, Any]:
     data = env.load_data()
-    provider = OpenRouterProvider(model=WORKER_MODEL)
+    provider = GeminiProvider(model=WORKER_MODEL, reasoning=WORKER_REASONING)
     if condition == "policy_violation":
         provider = FaultInjector(provider, FaultSpec(FaultKind.POLICY_VIOLATION, seed=seed, step=0))
     telemetry = HarnessTelemetry(

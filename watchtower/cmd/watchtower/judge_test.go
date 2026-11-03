@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,18 +114,57 @@ func TestBuildJudgeOpenRouter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildJudge: %v", err)
 	}
-	if m, ok := j.(interface{ Model() string }); !ok || m.Model() != "google/gemini-3.6-flash" {
+	if m, ok := j.(interface{ Model() string }); !ok || m.Model() != "deepseek/deepseek-v4.1-flash-1017" {
 		t.Fatalf("default openrouter model = %v", j)
 	}
 	if _, err := j.Run(&graph.Run{TraceID: "t"}); err != nil {
 		t.Fatalf("judge call: %v", err)
 	}
-	if gotAuth != "Bearer or-key" || gotModel != "google/gemini-3.6-flash" {
+	if gotAuth != "Bearer or-key" || gotModel != "deepseek/deepseek-v4.1-flash-1017" {
 		t.Fatalf("auth=%q model=%q", gotAuth, gotModel)
 	}
 
 	t.Setenv("OPENROUTER_API_KEY", "")
 	if _, err := buildJudge(verify.Config{JudgeCfg: cfg}); err == nil {
 		t.Fatal("openrouter judge without a key must fail loudly")
+	}
+}
+
+func TestBuildJudgeReasoningFields(t *testing.T) {
+	cases := []struct {
+		name, backend, keyEnv, level, want string
+	}{
+		{"gemini low", "gemini", "GEMINI_API_KEY", "low", `"reasoning_effort":"low"`},
+		{"gemini off", "gemini", "GEMINI_API_KEY", "off", `"reasoning_effort":"none"`},
+		{"openrouter off", "openrouter", "OPENROUTER_API_KEY", "off", `"reasoning":{"enabled":false}`},
+		{"openrouter high", "openrouter", "OPENROUTER_API_KEY", "high", `"reasoning":{"effort":"high"}`},
+		{"default omits field", "openrouter", "OPENROUTER_API_KEY", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, _ := io.ReadAll(r.Body)
+				body = string(raw)
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"issues\":[]}"}}]}`))
+			}))
+			defer srv.Close()
+			t.Setenv(tc.keyEnv, "k")
+			cfg := verify.JudgeConfig{Enabled: true, Backend: tc.backend, BaseURL: srv.URL, Reasoning: tc.level}
+			j, err := buildJudge(verify.Config{JudgeCfg: cfg})
+			if err != nil {
+				t.Fatalf("buildJudge: %v", err)
+			}
+			if _, err := j.Run(&graph.Run{TraceID: "t"}); err != nil {
+				t.Fatalf("judge call: %v", err)
+			}
+			if tc.want == "" {
+				if strings.Contains(body, "reasoning") {
+					t.Fatalf("unexpected reasoning field: %s", body)
+				}
+			} else if !strings.Contains(body, tc.want) {
+				t.Fatalf("body %s missing %s", body, tc.want)
+			}
+		})
 	}
 }

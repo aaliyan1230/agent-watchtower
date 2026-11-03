@@ -1,9 +1,9 @@
 """Execute the experiment grid against a watchtower server.
 
 Offline by default: FakeProvider drives every cell deterministically —
-free, reproducible, no keys. --live switches to real Gemini workers and
-the LLM judge via OpenRouter, for small stratified samples only (the
-pilot budget rule).
+free, reproducible, no keys. --live switches to real Gemini workers (Gemini
+API) and a live LLM judge (Gemini direct, or DeepSeek/Kimi via
+OpenRouter), for small stratified samples only (the pilot budget rule).
 The fault lands on a fixed response step offline (deterministic); live
 cells corrupt every turn instead, because a real model's turn count is
 not predictable.
@@ -25,7 +25,7 @@ from typing import Any
 
 from harness.env import get_api_key
 from harness.faults import FaultInjector, FaultKind, FaultSpec
-from harness.providers import FakeProvider, OpenRouterProvider, Provider, ProviderResponse
+from harness.providers import FakeProvider, GeminiProvider, Provider, ProviderResponse
 from harness.server import REPO_ROOT, spawn_server
 from harness.supervisor import Supervisor
 from harness.telemetry import HarnessTelemetry
@@ -35,7 +35,8 @@ from .suite import PROTOCOL_VERSION, ExperimentCell, build_evidence_grid, build_
 
 ENDPOINT = "http://127.0.0.1:4318"
 ADDR = "127.0.0.1:4318"
-LIVE_MODEL = "google/gemini-3.5-flash-lite"  # cheapest tier for the pilot, via OpenRouter
+LIVE_MODEL = "gemini-3.5-flash-lite"  # newest lite tier, Gemini API
+LIVE_REASONING = "low"
 
 
 def aws_env() -> dict[str, str]:
@@ -146,7 +147,7 @@ def build_workers(telemetry: HarnessTelemetry, cell, live: bool) -> list[Worker]
             spec = FaultSpec(FaultKind(cell.fault), seed=cell.seed, step=FAULT_STEP[cell.fault])
     provider: Provider
     if live:
-        provider = OpenRouterProvider(model=LIVE_MODEL)
+        provider = GeminiProvider(model=LIVE_MODEL, reasoning=LIVE_REASONING)
     else:
         provider = FakeProvider(NORMAL_SCRIPT)
     if spec is not None:
@@ -234,8 +235,8 @@ def main() -> None:
     parser.add_argument("--config", type=str, default="", help="config file name under watchtower/testdata (baseline runs)")
     args = parser.parse_args()
 
-    if args.live and not get_api_key("OPENROUTER_API_KEY"):
-        raise SystemExit("--live needs OPENROUTER_API_KEY in .env")
+    if args.live and not get_api_key("GEMINI_API_KEY"):
+        raise SystemExit("--live workers need GEMINI_API_KEY in .env")
 
     if args.false_assurance:
         if args.pilot:
