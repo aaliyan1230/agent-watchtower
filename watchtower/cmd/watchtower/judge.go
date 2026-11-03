@@ -26,9 +26,9 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 		if model == "" {
 			// Judge calls are capped per run, so the smarter tier is
 			// affordable here; workers bulk on flash-lite (see .env.example).
-			model = "gemini-3.6-flash"
+			model = "gemini-3.8-flash"
 		}
-		return judge.New(model, key, cfg.JudgeCfg.BaseURL), nil
+		return judge.New(model, key, cfg.JudgeCfg.BaseURL, geminiReasoning(cfg.JudgeCfg.Reasoning)), nil
 	case "openrouter":
 		key := os.Getenv("OPENROUTER_API_KEY")
 		if key == "" {
@@ -36,13 +36,13 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 		}
 		model := cfg.JudgeCfg.Model
 		if model == "" {
-			model = "google/gemini-3.6-flash"
+			model = "deepseek/deepseek-v4.1-flash-1017"
 		}
 		baseURL := cfg.JudgeCfg.BaseURL
 		if baseURL == "" {
 			baseURL = "https://openrouter.ai/api/v1"
 		}
-		return judge.New(model, key, baseURL), nil
+		return judge.New(model, key, baseURL, openRouterReasoning(cfg.JudgeCfg.Reasoning)), nil
 	case "bedrock":
 		creds, err := bedrock.CredentialsFromEnv()
 		if err != nil {
@@ -59,5 +59,30 @@ func buildJudge(cfg verify.Config) (verify.Judge, error) {
 		return judge.NewBedrock(model, region, creds), nil
 	default:
 		return nil, errors.New("unknown judge backend: " + cfg.JudgeCfg.Backend)
+	}
+}
+
+// geminiReasoning maps a level onto the Gemini OpenAI-compat field.
+func geminiReasoning(level string) map[string]any {
+	switch level {
+	case "":
+		return nil
+	case "off":
+		return map[string]any{"reasoning_effort": "none"}
+	default:
+		return map[string]any{"reasoning_effort": level}
+	}
+}
+
+// openRouterReasoning maps a level onto OpenRouter's unified reasoning
+// object, which it translates per upstream vendor.
+func openRouterReasoning(level string) map[string]any {
+	switch level {
+	case "":
+		return nil
+	case "off":
+		return map[string]any{"reasoning": map[string]any{"enabled": false}}
+	default:
+		return map[string]any{"reasoning": map[string]any{"effort": level}}
 	}
 }

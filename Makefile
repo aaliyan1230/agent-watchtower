@@ -18,7 +18,7 @@ serve: ## run watchtower serve on :4318
 demo: ## offline python demo: fake provider -> spans -> serve -> report
 	.venv/bin/python -m harness.demo
 
-live: ## live smoke test (needs OPENROUTER_API_KEY in .env)
+live: ## live smoke test (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m harness.live_smoke
 
 venv: ## create .venv and install harness + experiments (+ dev extras)
@@ -46,22 +46,22 @@ experiment-false-assurance: ## 2x2 behavior x telemetry grid, contract vs behavi
 	.venv/bin/python -m experiments.run --false-assurance --no-traces --config experiment_behavior_only_config.json --out artifacts/results-fa-baseline.json
 	.venv/bin/python -m experiments.analyze --false-assurance --results artifacts/results-fa.json --baseline artifacts/results-fa-baseline.json
 
-experiment-fa-live: ## live judge pilot over the four conditions (needs OPENROUTER_API_KEY in .env)
+experiment-fa-live: ## live judge pilot over the four conditions (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --false-assurance --pilot --out artifacts/results-fa-live.json
 	.venv/bin/python -m experiments.analyze --false-assurance --results artifacts/results-fa-live.json
 
-experiment-taubench: ## tau-bench retail generalization pilot (needs OPENROUTER_API_KEY in .env)
+experiment-taubench: ## tau-bench retail generalization pilot (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.taubench --out artifacts/results-taubench.json
 
-experiment-live: ## small live stratified sample, Gemini judge (needs OPENROUTER_API_KEY in .env)
+experiment-live: ## small live stratified sample, Gemini judge (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --out artifacts/results-live.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json
 
-experiment-deepseek: ## same pilot with the DeepSeek judge (needs OPENROUTER_API_KEY in .env)
+experiment-deepseek: ## same pilot with the DeepSeek judge (needs GEMINI_API_KEY + OPENROUTER_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --judge deepseek --out artifacts/results-live-deepseek.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live-deepseek.json
 
-experiment-kimi: ## same pilot with the Kimi judge (needs OPENROUTER_API_KEY in .env)
+experiment-kimi: ## same pilot with the Kimi judge (needs GEMINI_API_KEY + OPENROUTER_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --judge kimi --out artifacts/results-live-kimi.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live-kimi.json
 
@@ -72,7 +72,7 @@ experiment-causal: ## offline CausalTrace sweep: canonical checksums, flips, pre
 	.venv/bin/python -m experiments.causal_run --out artifacts/results-causal.json
 	.venv/bin/python -m experiments.analyze --causal --results artifacts/results-causal.json
 
-experiment-causal-judge: ## live causal judge over renderings, across families (needs OPENROUTER_API_KEY in .env)
+experiment-causal-judge: ## live causal judge over renderings, across families (needs GEMINI_API_KEY + OPENROUTER_API_KEY in .env)
 	.venv/bin/python -m experiments.causal_judge --judge gemini --out artifacts/results-causal-judge-gemini.json
 	.venv/bin/python -m experiments.causal_judge --judge deepseek --out artifacts/results-causal-judge-deepseek.json
 	.venv/bin/python -m experiments.causal_judge --judge kimi --out artifacts/results-causal-judge-kimi.json

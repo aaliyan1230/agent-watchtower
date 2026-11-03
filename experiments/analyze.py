@@ -374,6 +374,9 @@ MODEL_PRICES = {
     "google/gemini-3.5-flash-lite": (0.30, 2.50),
     "deepseek/deepseek-v3.2": (0.26, 0.38),
     "moonshotai/kimi-k2.5": (0.50, 2.50),
+    "gemini-3.8-flash": (0.83, 4.12),
+    "deepseek/deepseek-v4.1-flash-1017": (0.30, 1.20),
+    "moonshotai/kimi-k3": (0.19, 15.00),
 }
 
 

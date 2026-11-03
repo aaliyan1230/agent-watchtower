@@ -4,9 +4,10 @@ One interface, config-driven model per slot (worker / supervisor /
 judge). FakeProvider keeps the harness runnable offline and
 deterministic — the experiment needs seeded reproducibility before it
 ever talks to a real model. ChatCompletionsProvider is the real client
-for any OpenAI-compatible endpoint (OpenRouter for live runs, Gemini
-direct as an alternative): keys via the environment (harness/env.py),
-base URL overridable so tests can point it at a mock server.
+for any OpenAI-compatible endpoint (Gemini direct for Gemini models,
+OpenRouter for every other family): keys via the environment
+(harness/env.py), base URL overridable so tests can point it at a mock
+server.
 """
 
 from __future__ import annotations
@@ -105,8 +106,10 @@ class ChatCompletionsProvider(Provider):
         api_key: str | None = None,
         base_url: str | None = None,
         client: httpx.Client | None = None,
+        reasoning: str | None = None,
     ):
         self.model = model or self.DEFAULT_MODEL
+        self.reasoning = reasoning
         # None means "read from env"; an explicit empty string means
         # "there is no key" and must not fall through to the env value.
         self._api_key = api_key if api_key is not None else get_api_key(self.KEY_ENV)
@@ -125,6 +128,8 @@ class ChatCompletionsProvider(Provider):
             payload["tools"] = list(tools)
         if contract:
             payload["response_format"] = {"type": "json_object"}
+        if self.reasoning:
+            payload.update(self._reasoning_fields(self.reasoning))
         for attempt in range(2):
             try:
                 return self._complete(payload)
@@ -138,6 +143,12 @@ class ChatCompletionsProvider(Provider):
                 if attempt == 1:
                     raise
                 time.sleep(1)
+
+    def _reasoning_fields(self, level: str) -> dict[str, Any]:
+        """Vendors disagree on what "low" means (DeepSeek spends thousands
+        of tokens at low effort), so callers pass each model's minimum
+        explicitly and this only maps the level onto the wire field."""
+        return {"reasoning_effort": "none" if level == "off" else level}
 
     def _complete(self, payload: dict[str, Any]) -> ProviderResponse:
         resp = self._client.post(
@@ -181,13 +192,18 @@ class GeminiProvider(ChatCompletionsProvider):
 
 
 class OpenRouterProvider(ChatCompletionsProvider):
-    """One key for every model family the experiments use (Gemini workers
-    and judges, DeepSeek, Kimi); model ids carry the vendor prefix."""
+    """Every non-Gemini family the experiments use (DeepSeek, Kimi) behind
+    one key; model ids carry the vendor prefix."""
 
     name = "openrouter"
     DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-    DEFAULT_MODEL = "google/gemini-3.5-flash-lite"
+    DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017"
     KEY_ENV = "OPENROUTER_API_KEY"
+
+    def _reasoning_fields(self, level: str) -> dict[str, Any]:
+        if level == "off":
+            return {"reasoning": {"enabled": False}}
+        return {"reasoning": {"effort": level}}
 
 
 def tool_schema(name: str, description: str, args: dict[str, Any]) -> dict[str, Any]:
