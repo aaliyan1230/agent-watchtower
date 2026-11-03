@@ -96,6 +96,7 @@ def test_goproducer_clean_passes(server, goproducer):
     ("omit-tool-result", "tool_pairing"),
     ("omit-tool-id", "tool_pairing"),
     ("omit-final", "final_answer"),
+    ("omit-closed", "trace_closed"),
 ])
 def test_omitted_field_abstains_instead_of_passing(server, goproducer, variant, claim):
     _, report = run_goproducer(variant)

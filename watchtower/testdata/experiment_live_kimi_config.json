@@ -21,7 +21,8 @@
       "requireToolResults": true,
       "requireFinalAnswer": true,
       "requireSupervisorDecision": true,
-      "requireTemporalNesting": true
+      "requireTemporalNesting": true,
+      "requireTraceClosed": true
     }
   },
   "judge": { "enabled": true, "backend": "bedrock", "model": "moonshotai.kimi-k2.5" }
