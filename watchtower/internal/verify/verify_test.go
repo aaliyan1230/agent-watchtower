@@ -76,8 +76,8 @@ func TestVerifyJudgeFailureSurfacesAsFinding(t *testing.T) {
 	if len(f) != 1 {
 		t.Fatalf("findings = %d, want 1 (judge failure surfaces as a finding)", len(f))
 	}
-	if f[0].Verifier != "stub" || f[0].Severity != SeverityWarning {
-		t.Errorf("judge finding = %+v, want stub/warning", f[0])
+	if f[0].Verifier != "stub" || f[0].Severity != SeverityWarning || f[0].Kind != FindingJudgeError {
+		t.Errorf("judge finding = %+v, want stub/warning/judge_error", f[0])
 	}
 }
 

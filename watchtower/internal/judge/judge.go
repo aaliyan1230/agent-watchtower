@@ -61,6 +61,8 @@ func (j *LLM) Run(run *graph.Run) ([]verify.Finding, error) {
 			Description string `json:"description"`
 		} `json:"issues"`
 	}
+	// A failed call must not report the previous run's tokens.
+	j.lastIn, j.lastOut = 0, 0
 	text, err := j.client.ChatText(context.Background(), systemPrompt, summarizeRun(run))
 	if err != nil {
 		return nil, err
