@@ -100,7 +100,10 @@ judge_flip_rate -- fraction of judged traces whose LLM verdict differs
    from it, which is the measured phenomenon.
    Current:  gemini   (google/gemini-3.5-flash-lite)  0.48 (n=160)
              deepseek (deepseek/deepseek-v3.2)        0.65 (n=160)
-             kimi     (moonshotai/kimi-k2.5)          pending (run in progress)
+             kimi     (moonshotai/kimi-k2.5)          not measured: with default
+                      reasoning it spent ~40s and ~4.5k reasoning tokens per
+                      call, so the full grid was cancelled. The next model
+                      refresh sets judge reasoning explicitly.
 
    PASS counts per rendering (text / time_sorted / canonical, of 160):
              gemini   42 / 43 / 80
@@ -119,7 +122,7 @@ judge_flip_rate -- fraction of judged traces whose LLM verdict differs
 cross-family judge kappa -- Cohen's kappa (PASS vs not) over shared
    (trace, rendering) pairs. Current (n=480 shared pairs):
              gemini vs deepseek 0.14
-   Kimi joins the 3-family matrix when its run completes.
+   The 3-family matrix waits on the model refresh.
 
 Live spend (measured tokens x OpenRouter list prices)
 -----------------------------------------------------
