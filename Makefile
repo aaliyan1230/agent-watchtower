@@ -1,4 +1,4 @@
-.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-deepseek experiment-kimi experiment-agreement experiment-causal experiment-causal-judge diagrams
+.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-deepseek experiment-kimi experiment-agreement experiment-causal experiment-causal-judge experiment-decide diagrams
 
 test: ## go test -race (core + producer) + pytest
 	cd watchtower && go test ./... -race
@@ -67,6 +67,10 @@ experiment-kimi: ## same pilot with the Kimi judge (needs GEMINI_API_KEY + OPENR
 
 experiment-agreement: ## inter-judge kappa across providers
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-deepseek.json --compare artifacts/results-live-kimi.json
+
+experiment-decide: ## offline decision layer: cost-aware policy vs fixed rules over recorded results (free)
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-fa.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-fa.json
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-live-full.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-live.json
 
 experiment-causal: ## offline CausalTrace sweep: canonical checksums, flips, premature passes
 	.venv/bin/python -m experiments.causal_run --out artifacts/results-causal.json
