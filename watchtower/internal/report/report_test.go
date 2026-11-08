@@ -56,8 +56,8 @@ func TestVerdictFor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := verdictFor(tt.findings); got != tt.want {
-				t.Fatalf("verdictFor() = %s, want %s", got, tt.want)
+			if got := VerdictFor(tt.findings); got != tt.want {
+				t.Fatalf("VerdictFor() = %s, want %s", got, tt.want)
 			}
 		})
 	}
