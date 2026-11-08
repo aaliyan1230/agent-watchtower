@@ -212,6 +212,26 @@ The same 420 cells run live with real workers give the same result:
 Gemini API (`GEMINI_API_KEY`) and DeepSeek and Kimi through OpenRouter
 (`OPENROUTER_API_KEY`), each judge at its minimum reasoning setting.
 
+### From verdict to action
+
+A verdict says what the evidence shows; someone still has to decide
+what to do. The decision layer (`watchtower decide`) picks the cheapest
+action given a cost table: accept, halt, escalate to a human, or first
+buy more evidence (replay the trace, or call the judge) when the answer
+is worth more than it costs. Auto-accept is gated by conformal risk
+control, so the rate of accepted faulty runs stays below a chosen α.
+
+On the recorded false-assurance grid it cuts cost 38% against fixed
+rules (81% when a miss is cheaper) with zero accepted faulty runs. On
+the live matrix it learns that the judge adds nothing the deterministic
+checks have not already shown, and makes zero judge calls where
+"judge everything" makes 100 per 100 runs. Details and caveats are in
+`experiments/DECISION_METRICS.txt`.
+
+```sh
+make experiment-decide    # offline, free: policies over recorded results
+```
+
 Artifacts are checksummed and versioned. Every results file records
 the protocol version, the config it ran under, and a signature over
 its cells, so numbers can be reproduced. `make experiment` regenerates
@@ -223,13 +243,14 @@ them from scratch.
 
 ```
 watchtower/            the Go service (module in its own directory)
-├── cmd/watchtower/    CLI: verify (one file) and serve (the service)
+├── cmd/watchtower/    CLI: verify (one file), serve (the service), decide
 └── internal/
     ├── model/         span model + attribute names ("the vocabulary")
     ├── otlp/          real OTLP protobuf -> internal model
     ├── ingest/        HTTP ingestion (protobuf or JSON)
     ├── graph/         flat spans -> reconstructed run
     ├── verify/        the deterministic checks + judge interface
+    ├── decide/        verdict -> action: risk, value of information, accept gate
     ├── judge/         LLM judge (Gemini API, OpenRouter, or Bedrock)
     ├── bedrock/       minimal SigV4-signed Bedrock client
     └── report/        verdict + evidence bundle + report store

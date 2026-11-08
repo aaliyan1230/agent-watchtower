@@ -65,7 +65,7 @@ func Build(run *graph.Run, findings []verify.Finding, judged bool) *Report {
 		ProtocolVersion: ProtocolVersion,
 		TraceID:         run.TraceID,
 		RootSpanID:      run.RootSpanID,
-		Verdict:         verdictFor(findings),
+		Verdict:         VerdictFor(findings),
 		Judged:          judged,
 		Findings:        findings,
 		Budget:          run.Budget,
@@ -81,7 +81,7 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 	r.JudgeUsage = JudgeUsage{InputTokens: input, OutputTokens: output}
 }
 
-// verdictFor maps findings to a verdict. Ordering is deliberate and
+// VerdictFor maps findings to a verdict. Ordering is deliberate and
 // runs from strongest-to-weakest confidence: an observed deterministic
 // critical violation fails even on an unclosed or incomplete trace,
 // because spans arriving later cannot undo a forbidden call, an
@@ -89,7 +89,7 @@ func (r *Report) SetJudgeUsage(input, output int64) {
 // gap, including an unclosed trace, abstains INCONCLUSIVE (no premature
 // PASS); a judge critical finding fails only when the channel supports
 // it; warnings flag. Only a closed, complete, clean run passes.
-func verdictFor(findings []verify.Finding) Verdict {
+func VerdictFor(findings []verify.Finding) Verdict {
 	detCritical, judgeCritical := false, false
 	warning, evidenceGap := false, false
 	for _, f := range findings {
