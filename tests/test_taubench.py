@@ -83,3 +83,13 @@ def test_required_outputs_come_from_the_agent():
     spoken = env.reward(data, task, responses=[f"The answer is {', '.join(task.outputs)}."])
     assert spoken["reward"] == 1.0
 
+
+def test_replay_follows_the_decision_when_there_is_one():
+    from experiments.taubench import wants_replay
+
+    gap = {"kind": "evidence_gap", "verifier": "evidence"}
+    assert wants_replay({"findings": [gap]})
+    assert not wants_replay({"findings": [{"verifier": "loop"}]})
+    assert not wants_replay(None)
+    assert wants_replay({"findings": [gap], "decision": {"action": "replay"}})
+    assert not wants_replay({"findings": [gap], "decision": {"action": "escalate"}})
