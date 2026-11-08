@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .tools import ALL_TOOLS
 from .types import Action, Task, consistent_hash, to_hashable
@@ -43,10 +43,13 @@ def apply_action(data: dict[str, Any], action: Action) -> str:
     return tool.invoke(data, **action.kwargs)
 
 
-def reward(data_after_agent: dict[str, Any], task: Task) -> dict[str, Any]:
+def reward(data_after_agent: dict[str, Any], task: Task, responses: Sequence[str] = ()) -> dict[str, Any]:
     """tau-bench's calculate_reward, distilled: state-hash equality
-    with the reference solution plus required-output coverage. Returns
-    {reward: 0|1, actionsMatch: bool, outputsFound: [..], gtDataHash}."""
+    with the reference solution plus required-output coverage. Required
+    outputs are searched in what the agent said (`responses`), as
+    upstream does with the episode's respond actions; the reference
+    actions never contain them. Returns {reward: 0|1, actionsMatch,
+    outputsFound, gtDataHash}."""
     reference = load_data()
     for action in task.actions:
         if action.name != RESPOND_ACTION_NAME:
@@ -56,15 +59,9 @@ def reward(data_after_agent: dict[str, Any], task: Task) -> dict[str, Any]:
     actions_match = data_hash(data_after_agent) == gt_hash
 
     outputs_found: list[tuple[str, bool]] = []
+    said = [r.lower().replace(",", "") for r in responses]
     for output in task.outputs:
-        found = False
-        for action in task.actions:
-            if action.name == RESPOND_ACTION_NAME:
-                content = action.kwargs.get("content", "").lower().replace(",", "")
-                if output.lower() in content:
-                    found = True
-                    break
-        outputs_found.append((output, found))
+        outputs_found.append((output, any(output.lower() in r for r in said)))
 
     score = 1.0 if actions_match and all(found for _, found in outputs_found) else 0.0
     return {
@@ -75,10 +72,15 @@ def reward(data_after_agent: dict[str, Any], task: Task) -> dict[str, Any]:
     }
 
 
+TEST_TASKS_PATH = Path(__file__).parent / "tasks_test.json"
+
+
 def load_tasks(path: Path, limit: int = 0) -> list[Task]:
-    """Load the exported task subset. The subset was exported from
-    tau-bench's retail tasks_train.py with the reference actions
-    intact; each task is the benchmark's own ground-truth solution."""
+    """Load exported tasks with their reference actions intact; each
+    task is the benchmark's own ground-truth solution. tasks_subset.json
+    holds 12 tasks from tau-bench's retail tasks_train.py; tasks_test.json
+    holds all 115 of retail tasks_test.py, parsed from source without
+    executing it."""
     raw = json.loads(path.read_text())
     if limit:
         raw = raw[:limit]
