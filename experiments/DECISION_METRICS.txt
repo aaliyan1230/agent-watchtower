@@ -1,0 +1,104 @@
+DECISION_METRICS -- offline evaluation of the decision layer (phase 1)
+=====================================================================
+Computed by: make experiment-decide
+  (watchtower decide over artifacts/results-fa.json and
+   artifacts/results-live-full.json; JSON in artifacts/results-decide-*.json)
+Report protocol: 0.13. No live model calls; both inputs are recorded runs.
+
+What the decision layer does
+----------------------------
+A verdict says what the evidence shows. The decision layer picks what to
+do about it: accept the run, halt it, escalate to a human, or buy more
+evidence first (replay the trace with clean telemetry, or call the LLM
+judge). Package watchtower/internal/decide:
+
+- Signature: the verdict recomputed without the judge, plus the verifiers
+  that fired and the evidence claims left unsupported. The judge is kept
+  out because it is a probe the policy pays for.
+- Risk: P(faulty | signature), counted on the fit split and shrunk toward
+  the verdict-level rate (2 pseudo-runs), itself shrunk toward 0.5.
+- Policy: the action with the lowest expected cost. A probe is valued by
+  one-step lookahead: its price plus the expected cost of the best final
+  action after its answer (value of information).
+- Accept gate: conformal risk control (Angelopoulos et al., 2022). The
+  largest risk threshold t with (accepted-faulty count + 1)/(n + 1) <= alpha
+  on the calibration split. Guarantee: the expected rate of accepted
+  faulty runs is <= alpha, given exchangeable runs and a calibration split
+  disjoint from the fit split.
+
+Protocol
+--------
+Fit seeds 1,2 | calibrate seed 3 | test seeds 4,5; then all 30 rotations
+of the five seeds with the same split sizes. Ground truth: the injected
+behavior fault. Default costs: miss 100, false halt 10, human 5,
+replay 1, judge 0.5; alpha 0.05. Only cost ratios matter.
+
+Baselines: oracle (knows the label, cost 0); rules (PASS accepts,
+INCONCLUSIVE escalates, anything else halts); judge-first (judge every
+run, a flag vetoes a pass); bayes-no-probe; bayes-ungated.
+
+Results: false-assurance grid (offline, 490 runs; 196 test runs)
+----------------------------------------------------------------
+policy           cost/run  accepted faulty  escalate/100  probe/100
+rules               1.429             0.0%          28.6        0.0
+bayes-no-probe      0.867             0.0%          11.2        0.0
+bayes               0.888             0.0%          14.3       17.3
+
+cost/run as the miss cost varies (gate threshold from calibration)
+   miss   gate        rules   no-probe   bayes
+      5   <= 0.1897   1.429      0.306   0.245
+     10   <= 0.0556   1.429      0.306   0.265
+     50   <= 0.0556   1.429      0.765   0.265
+    100   closed      1.429      0.867   0.888
+    500   closed      1.429      0.867   0.888
+
+- The cost-aware policy cuts cost 38% versus the fixed rules at the
+  default prices (81% when a miss costs <= 50), with zero accepted faulty
+  runs, mostly by replacing blanket escalation with cheap replays.
+- At miss >= 100 it never auto-accepts: the fit split holds only 4 clean
+  PASS runs, so P(faulty | PASS) stays at 0.056 and accepting costs more
+  than a human review. For the same reason probing barely loses to not
+  probing (0.888 vs 0.867): a replay that comes back PASS still ends in
+  an escalation. A probe is only worth what the policy can do with its
+  answer.
+- All 30 rotations give identical numbers: every seed of the offline grid
+  replays the same scripted behavior, so rotation adds no variance here.
+
+Results: live behavior matrix (210 runs, gemini-3.8-flash judge)
+----------------------------------------------------------------
+policy           cost/run  accepted faulty  probe/100
+rules               0.000             0.0%        0.0
+judge-first         0.500             0.0%      100.0
+bayes               0.000             0.0%        0.0
+
+- Deterministic verdicts already separate faulty from healthy runs, so
+  the judge has no value of information. The policy learns this and
+  makes zero judge calls; judge-first pays for 100 per 100 runs and buys
+  nothing. At miss = 500 the policy probes the judge on 14 runs per 100
+  (cost 0.071/run) because a 1-in-500 slip is no longer negligible.
+
+The accept gate on this data
+----------------------------
+The gate never binds: even at miss = 5, where accepting a coin-flip run
+looks cheap, the probing policy accepted no faulty run (the no-probe
+policy accepted 2.0%, still under alpha). The gate is a guarantee that
+costs nothing here; its refusal path is covered by unit tests
+(internal/decide). It earns its keep when the risk model is wrong, which
+needs runs with real behavioral noise: phase 2.
+
+Caveats
+-------
+- Offline replay outcomes come from the paired clean-telemetry cell of the
+  same behavior, so a replay always resolves the gap. Real recollection
+  can fail or differ; phase 2 measures that.
+- Base rates are set by the grid design (one clean behavior to six faults
+  per telemetry condition), and the policy's numbers depend on them.
+  Costs are swept; base rates are not yet.
+- The live matrix has clean telemetry, so replay never applies there.
+
+Next phases
+-----------
+2. The server attaches a decision to every report, and the supervisor
+   acts on it in closed-loop tau-bench runs (real noise, real probes).
+3. Anytime-valid (e-process) halting for streaming verification.
+4. Export the fitted policy as a DMN decision table for audit.
