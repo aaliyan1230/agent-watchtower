@@ -52,7 +52,7 @@ func TestServeAcceptsOTLPAndExposesReport(t *testing.T) {
 		Policy: verify.Policy{AllowedTools: []string{"search"}},
 		Limits: verify.Limits{MaxSteps: 10},
 	}
-	mux := newServeMux(cfg, report.NewStore(time.Minute))
+	mux := newServeMux(cfg, report.NewStore(time.Minute), nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -95,7 +95,7 @@ func TestServeAcceptsOTLPAndExposesReport(t *testing.T) {
 }
 
 func TestServeReportNotFound(t *testing.T) {
-	mux := newServeMux(verify.Config{}, report.NewStore(time.Minute))
+	mux := newServeMux(verify.Config{}, report.NewStore(time.Minute), nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	resp, err := http.Get(srv.URL + "/v1/reports/deadbeef")

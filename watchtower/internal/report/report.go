@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.13"
+const ProtocolVersion = "0.14"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -56,7 +56,24 @@ type Report struct {
 	Verifiers       []VerifierSummary `json:"verifiers"`
 	Budget          graph.Budget      `json:"budget"`
 	Evidence        graph.Evidence    `json:"evidence"`
+	Decision        *Decision         `json:"decision,omitempty"`
 	GeneratedAt     time.Time         `json:"generatedAt"`
+}
+
+// Decision is the decision layer's choice for the run (package decide).
+// First is its first move and Action where it ended after any probe the
+// server ran itself. Replaying the trace is the client's move, so a
+// replay also names the Fallback to take when no recollection exists.
+type Decision struct {
+	Signature string             `json:"signature"`
+	Risk      float64            `json:"risk"`
+	Posterior *float64           `json:"posterior,omitempty"`
+	First     string             `json:"first"`
+	Action    string             `json:"action"`
+	Fallback  string             `json:"fallback,omitempty"`
+	Expected  map[string]float64 `json:"expected"`
+	Gated     bool               `json:"gated,omitempty"`
+	Threshold float64            `json:"threshold"`
 }
 
 // Build assembles a Report from a reconstructed run and its findings.

@@ -128,18 +128,24 @@ func Verify(run *graph.Run, cfg Config) []Finding {
 		out = append(out, CheckEvidence(run, cfg.Evidence.Obligations)...)
 	}
 	if cfg.Judge != nil {
-		if js, err := cfg.Judge.Run(run); err != nil {
-			out = append(out, Finding{
-				Verifier: cfg.Judge.Name(),
-				Kind:     FindingJudgeError,
-				Severity: SeverityWarning,
-				Message:  "judge failed: " + err.Error(),
-			})
-		} else {
-			out = append(out, js...)
-		}
+		out = append(out, RunJudge(run, cfg.Judge)...)
 	}
 	return out
+}
+
+// RunJudge runs the judge and turns an outage into a judge_error
+// finding rather than an error, so it never hides deterministic results.
+func RunJudge(run *graph.Run, j Judge) []Finding {
+	js, err := j.Run(run)
+	if err != nil {
+		return []Finding{{
+			Verifier: j.Name(),
+			Kind:     FindingJudgeError,
+			Severity: SeverityWarning,
+			Message:  "judge failed: " + err.Error(),
+		}}
+	}
+	return js
 }
 
 // VerifierNames lists the deterministic verifiers, in run order — used

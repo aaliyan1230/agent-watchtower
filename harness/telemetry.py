@@ -190,6 +190,25 @@ class EvidenceFaultExporter(SpanExporter):
         return self._inner.force_flush(timeout_millis)
 
 
+class _CleanCopy(SpanExporter):
+    """Keeps each batch as the producer emitted it, before any transport
+    fault, so a replay can re-send what a lossy collector dropped."""
+
+    def __init__(self, inner: SpanExporter):
+        self._inner = inner
+        self.spans: list[ReadableSpan] = []
+
+    def export(self, spans) -> SpanExportResult:
+        self.spans.extend(spans)
+        return self._inner.export(spans)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
 class HarnessTelemetry:
     """Owns the tracer used by workers and supervisor. BatchSpanProcessor
     accumulates spans until flush() — one export per run, which is what
@@ -216,6 +235,7 @@ class HarnessTelemetry:
         )
         if evidence_fault:
             exporter = EvidenceFaultExporter(exporter, evidence_fault)
+        exporter = self._clean = _CleanCopy(exporter)
         self._recorder: TraceRecorder | None = None
         if trace_dir:
             # This wrapper sits outside EvidenceFaultExporter, so it sees a
@@ -249,6 +269,16 @@ class HarnessTelemetry:
         """Synchronously export all pending spans; returns whether the
         ingest accepted them."""
         return self._processor.force_flush()
+
+    def replay(self) -> bool:
+        """Re-send the run's spans without the transport fault: the
+        decision layer's replay probe. The server re-verifies the trace
+        and replaces its report."""
+        exporter = OTLPSpanExporter(endpoint=self._endpoint + "/v1/traces", timeout=300)
+        try:
+            return exporter.export(list(self._clean.spans)) == SpanExportResult.SUCCESS
+        finally:
+            exporter.shutdown()
 
     def finalize_trace(
         self,

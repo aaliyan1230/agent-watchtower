@@ -39,6 +39,6 @@ func (m *Model) CalibrateAccept(cal []Run, c Costs, probes bool, alpha float64) 
 		}
 		threshold = a.risk
 	}
-	m.Threshold = threshold
+	m.Threshold, m.Costs, m.Alpha = threshold, c, alpha
 	return threshold
 }

@@ -124,10 +124,22 @@ func (r Run) Observation() Observation {
 	}
 }
 
-type counts struct{ faulty, total int }
+// Counts tallies labeled runs for one key.
+type Counts struct {
+	Faulty int `json:"faulty"`
+	Total  int `json:"total"`
+}
 
-func (c counts) rate(priorMean, strength float64) float64 {
-	return (float64(c.faulty) + strength*priorMean) / (float64(c.total) + strength)
+func (c Counts) rate(priorMean, strength float64) float64 {
+	return (float64(c.Faulty) + strength*priorMean) / (float64(c.Total) + strength)
+}
+
+// JudgeCounts is the judge's confusion matrix on judged training runs.
+type JudgeCounts struct {
+	TP int `json:"tp"`
+	FN int `json:"fn"`
+	FP int `json:"fp"`
+	TN int `json:"tn"`
 }
 
 // priorStrength is how many pseudo-runs of the verdict-level rate a
@@ -137,51 +149,56 @@ const priorStrength = 2
 
 // Model is the calibrated part of the policy: risk per signature, the
 // distribution of replay outcomes, the judge's error rates, and the
-// accept gate.
+// accept gate. It is plain data so a fitted model can be saved and
+// loaded by the server.
 type Model struct {
-	signature map[string]counts
-	verdict   map[string]counts
-	replay    map[string]map[string]int
-	judge     struct{ tp, fn, fp, tn int }
+	Signatures map[string]Counts         `json:"signatures"`
+	Verdicts   map[string]Counts         `json:"verdicts"`
+	Replays    map[string]map[string]int `json:"replays"`
+	JudgeStats JudgeCounts               `json:"judge"`
 	// Threshold is the accept gate: accept only at risk <= Threshold.
 	// 1 leaves the gate open; a negative value closes it.
-	Threshold float64
+	Threshold float64 `json:"threshold"`
+	// Costs and Alpha are what the gate was calibrated under; the gate
+	// is only valid at these prices.
+	Costs Costs   `json:"costs"`
+	Alpha float64 `json:"alpha"`
 }
 
 func Fit(runs []Run) *Model {
 	m := &Model{
-		signature: map[string]counts{},
-		verdict:   map[string]counts{},
-		replay:    map[string]map[string]int{},
-		Threshold: 1,
+		Signatures: map[string]Counts{},
+		Verdicts:   map[string]Counts{},
+		Replays:    map[string]map[string]int{},
+		Threshold:  1,
 	}
 	for _, r := range runs {
-		add := func(c counts) counts {
-			c.total++
+		add := func(c Counts) Counts {
+			c.Total++
 			if r.Faulty {
-				c.faulty++
+				c.Faulty++
 			}
 			return c
 		}
-		m.signature[r.Signature] = add(m.signature[r.Signature])
+		m.Signatures[r.Signature] = add(m.Signatures[r.Signature])
 		v := verdictOf(r.Signature)
-		m.verdict[v] = add(m.verdict[v])
+		m.Verdicts[v] = add(m.Verdicts[v])
 		if r.Gaps && r.ReplaySignature != "" {
-			if m.replay[r.Signature] == nil {
-				m.replay[r.Signature] = map[string]int{}
+			if m.Replays[r.Signature] == nil {
+				m.Replays[r.Signature] = map[string]int{}
 			}
-			m.replay[r.Signature][r.ReplaySignature]++
+			m.Replays[r.Signature][r.ReplaySignature]++
 		}
 		if r.Judged {
 			switch {
 			case r.Faulty && r.JudgeFlag:
-				m.judge.tp++
+				m.JudgeStats.TP++
 			case r.Faulty:
-				m.judge.fn++
+				m.JudgeStats.FN++
 			case r.JudgeFlag:
-				m.judge.fp++
+				m.JudgeStats.FP++
 			default:
-				m.judge.tn++
+				m.JudgeStats.TN++
 			}
 		}
 	}
@@ -191,19 +208,19 @@ func Fit(runs []Run) *Model {
 // Risk is the estimated probability the run is faulty, shrunk toward
 // its verdict's rate, which is itself shrunk toward one half.
 func (m *Model) Risk(sig string) float64 {
-	prior := m.verdict[verdictOf(sig)].rate(0.5, priorStrength)
-	return m.signature[sig].rate(prior, priorStrength)
+	prior := m.Verdicts[verdictOf(sig)].rate(0.5, priorStrength)
+	return m.Signatures[sig].rate(prior, priorStrength)
 }
 
 func (m *Model) hasJudge() bool {
-	j := m.judge
-	return j.tp+j.fn+j.fp+j.tn > 0
+	j := m.JudgeStats
+	return j.TP+j.FN+j.FP+j.TN > 0
 }
 
 // judgeRates are Laplace-smoothed true and false positive rates.
 func (m *Model) judgeRates() (tpr, fpr float64) {
-	j := m.judge
-	return float64(j.tp+1) / float64(j.tp+j.fn+2), float64(j.fp+1) / float64(j.fp+j.tn+2)
+	j := m.JudgeStats
+	return float64(j.TP+1) / float64(j.TP+j.FN+2), float64(j.FP+1) / float64(j.FP+j.TN+2)
 }
 
 // JudgePosterior updates a risk on the judge's answer by Bayes' rule.
@@ -259,8 +276,8 @@ type Decision struct {
 func (m *Model) Decide(obs Observation, c Costs, probes bool) Decision {
 	risk := m.Risk(obs.Signature)
 	expected := terminalCosts(risk, c)
-	if probes && obs.CanReplay && len(m.replay[obs.Signature]) > 0 {
-		outcomes := m.replay[obs.Signature]
+	if probes && obs.CanReplay && len(m.Replays[obs.Signature]) > 0 {
+		outcomes := m.Replays[obs.Signature]
 		total := 0
 		for _, n := range outcomes {
 			total += n
