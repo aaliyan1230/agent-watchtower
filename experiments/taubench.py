@@ -147,7 +147,6 @@ def run_task(idx: int, task: env.Task, condition: str, seed: int, trace_dir: str
         "task": idx,
         "userId": task.user_id,
         "condition": condition,
-        "seed": seed,
         "verdict": report["verdict"] if report else "NO_REPORT",
         "nativeReward": outcome["reward"],
         "actionsMatch": outcome["actionsMatch"],
@@ -183,7 +182,7 @@ def summarize(cells: list[dict[str, Any]]) -> str:
         success = sum(r["nativeReward"] == 1.0 for r in runs)
         lines.append(
             f"  {condition:<20} runs={n:>2} PASS={verdicts.count('PASS'):>2} "
-            f"FAIL={verdicts.count('FAIL'):>2} INCONCL={verdicts.count('INCONCLUSIVE'):>2} "
+            f"FLAGGED={verdicts.count('FLAGGED'):>2} FAIL={verdicts.count('FAIL'):>2} INCONCL={verdicts.count('INCONCLUSIVE'):>2} "
             f"nativeSuccess={success:>2}"
         )
     lines.append("")
@@ -197,14 +196,16 @@ def summarize(cells: list[dict[str, Any]]) -> str:
         lines.append(f"behavior detection (injected policy violation): {detection:.0%}")
 
     clean = [r for r in cells if r["condition"] == "clean"]
-    clean_pass = [r for r in clean if r["verdict"] == "PASS"]
+    # A judge flag turns PASS into FLAGGED, so the structural pass is the
+    # verdict with judge findings set aside.
+    structural_pass = [r for r in clean if all(f["verifier"] == "judge" for f in r["findings"])]
     if clean:
-        aligned = sum(r["nativeReward"] == 1.0 for r in clean_pass)
-        native_failed_pass = [r for r in clean_pass if r["nativeReward"] != 1.0]
-        lines.append(f"clean runs: PASS={len(clean_pass)}/{len(clean)}")
-        lines.append(f"  PASS x native success alignment: {aligned}/{len(clean_pass)}")
+        aligned = sum(r["nativeReward"] == 1.0 for r in structural_pass)
+        native_failed_pass = [r for r in structural_pass if r["nativeReward"] != 1.0]
+        lines.append(f"clean runs: structural PASS={len(structural_pass)}/{len(clean)}")
+        lines.append(f"  structural PASS x native success alignment: {aligned}/{len(structural_pass)}")
         if native_failed_pass:
-            judge_caught = sum(any(f["verifier"] == "judge" for f in r["findings"]) for r in native_failed_pass)
+            judge_caught = sum(r["verdict"] == "FLAGGED" for r in native_failed_pass)
             lines.append(
                 f"  native-failed but structural-PASS: {len(native_failed_pass)} "
                 f"(judge flagged {judge_caught}) — the semantic blind spot the judge supplements"
