@@ -1,4 +1,4 @@
-.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-deepseek experiment-kimi experiment-agreement experiment-causal experiment-causal-judge experiment-decide diagrams
+.PHONY: test vet serve demo live venv producer cross-producer experiment experiment-evidence experiment-false-assurance experiment-fa-live experiment-taubench experiment-live experiment-deepseek experiment-kimi experiment-agreement experiment-causal experiment-causal-judge experiment-decide experiment-taubench-test experiment-decide-taubench diagrams
 
 test: ## go test -race (core + producer) + pytest
 	cd watchtower && go test ./... -race
@@ -53,6 +53,9 @@ experiment-fa-live: ## live judge pilot over the four conditions (needs GEMINI_A
 experiment-taubench: ## tau-bench retail generalization pilot (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.taubench --out artifacts/results-taubench.json
 
+experiment-taubench-test: ## 345 live tau-bench runs over the 115-task test split, with replays and traces (needs GEMINI_API_KEY; ~$6)
+	.venv/bin/python -m experiments.taubench --split test --trace-dir artifacts/traces-taubench-test --out artifacts/results-taubench-test.json
+
 experiment-live: ## small live stratified sample, Gemini judge (needs GEMINI_API_KEY in .env)
 	.venv/bin/python -m experiments.run --live --pilot --out artifacts/results-live.json
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json
@@ -71,6 +74,10 @@ experiment-agreement: ## inter-judge kappa across providers
 experiment-decide: ## offline decision layer: cost-aware policy vs fixed rules over recorded results (free)
 	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-fa.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-fa.json
 	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-live-full.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-live.json
+
+experiment-decide-taubench: ## decision layer on tau-bench task folds, then the held-out folds through the server (judge only when bought)
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-taubench-test.json --rotate --sweep-miss 5,10,20,50,100,200,500 --save ../artifacts/decide-model-taubench.json --output ../artifacts/results-decide-taubench.json
+	.venv/bin/python -m experiments.decide_replay --model artifacts/decide-model-taubench.json
 
 experiment-causal: ## offline CausalTrace sweep: canonical checksums, flips, premature passes
 	.venv/bin/python -m experiments.causal_run --out artifacts/results-causal.json

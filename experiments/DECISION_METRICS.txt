@@ -1,5 +1,5 @@
-DECISION_METRICS -- offline evaluation of the decision layer (phase 1)
-=====================================================================
+DECISION_METRICS -- evaluation of the decision layer (phases 1 and 2)
+===================================================================
 Computed by: make experiment-decide
   (watchtower decide over artifacts/results-fa.json and
    artifacts/results-live-full.json; JSON in artifacts/results-decide-*.json)
@@ -96,9 +96,83 @@ Caveats
   Costs are swept; base rates are not yet.
 - The live matrix has clean telemetry, so replay never applies there.
 
+Phase 2: the decision served, on live tau-bench runs
+----------------------------------------------------
+Computed by: make experiment-taubench-test (live, ~$6), then
+make experiment-decide-taubench. Report protocol 0.14.
+
+Data: the 115-task tau-bench retail test split, three conditions per
+task (clean, drop_tool_result, policy_violation), 345 live runs.
+Worker gemini-3.5-flash-lite, judge gemini-3.8-flash on every run.
+114 of 115 drop_tool_result runs were replayed for real: the clean spans
+captured before the transport fault were re-sent to the server.
+
+Labels: faulty = the run failed its tau-bench task (native reward < 1)
+or carried the injected policy violation. Folds are tasks (task % 5 + 1),
+so no task appears in both the fit and test splits.
+
+Verifier on this data:
+  false assurance (dropped tool result read as PASS)   0 / 115
+  injected policy violation detected                   115 / 115
+  real replay recovered the gap                        114 / 114 replayed
+  native task success                                  93 / 345 (27%)
+  clean runs, structural PASS                          113 / 115
+    of which the task actually failed                  83
+    of those, judge flagged                            38 (46%)
+  judge flag rate on clean runs: faulty 45%, healthy 40%
+
+Decision layer, test folds 4,5 (138 runs), default costs:
+
+  policy            cost/run  acceptedFaulty  accept/100  falseHalt/100  probe/100
+  oracle               0.000            0.0%        14.5            0.0        0.0
+  rules               27.754           26.1%        33.3            0.0        0.0
+  judge-first         13.254           10.9%        15.9            2.2      100.0
+  bayes                1.449            0.0%         0.0           14.5        0.0
+
+  Mean over 30 fold rotations: rules 26.000, judge-first 15.254,
+  bayes 1.681; bayes accepted no faulty run in any rotation.
+
+End-to-end through the server (experiments/decide_replay.py): the same
+138 held-out runs posted to `watchtower serve` loaded with the saved
+model, transport faults re-applied, every decision followed. Cost/run
+1.449, 0 judge calls, 0 replays: identical to the offline replay.
+
+What this shows, and what it does not
+-------------------------------------
+The policy halts every run. That is the right answer on this data, and
+it is not the interesting one. The worker fails 73% of tasks, and a
+structural PASS says nothing about task success (35 of 45 PASS runs in
+the fit folds failed the task). Halting everything costs 0.17 x 10 per
+run; the PASS runs carry risk ~0.77, so accepting one costs ~77 at
+miss = 100, and still more than halting at miss = 5.
+
+Neither probe changes that action, so neither is bought. Replay always
+turned an INCONCLUSIVE run into PASS, which is still a halt. The judge
+is close to chance on task success (flag rate 45% vs 40%), and no answer
+it gives moves a PASS run's risk below the accept line. The policy
+saves 95% against rules and 89% against judge-first by refusing to pay
+for evidence that cannot change the decision. Paying for the judge on
+every run buys a 10.9% accepted-fault rate.
+
+The accept gate stays closed: the ungated policy accepts nothing on the
+calibration fold, so there is nothing to certify.
+
+Caveats specific to phase 2:
+- With a 27%-success worker the base rate decides the policy. A worker
+  that solves most tasks would make PASS runs acceptable and the judge
+  worth calling on them; that run is the test of the probing and the
+  gate on live noise.
+- The judge's error rates are pooled over all signatures, including
+  policy violations it flags easily (fit-fold TPR 0.67, FPR 0.26). On
+  PASS runs it is weaker than that. Pooling overstates its value there,
+  and it still does not pay.
+- Native reward is the label, so "faulty" includes plain task failure,
+  which the deterministic checks were never meant to see.
+
 Next phases
 -----------
-2. The server attaches a decision to every report, and the supervisor
-   acts on it in closed-loop tau-bench runs (real noise, real probes).
+2. Done: the server attaches a decision to every report; live
+   tau-bench runs with real replays (above). Open: a stronger worker,
+   so that accepting is ever right, and judge error rates per verdict.
 3. Anytime-valid (e-process) halting for streaming verification.
 4. Export the fitted policy as a DMN decision table for audit.

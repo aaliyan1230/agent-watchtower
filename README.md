@@ -225,11 +225,22 @@ On the recorded false-assurance grid it cuts cost 38% against fixed
 rules (81% when a miss is cheaper) with zero accepted faulty runs. On
 the live matrix it learns that the judge adds nothing the deterministic
 checks have not already shown, and makes zero judge calls where
-"judge everything" makes 100 per 100 runs. Details and caveats are in
-`experiments/DECISION_METRICS.txt`.
+"judge everything" makes 100 per 100 runs.
+
+`watchtower serve` attaches the decision to every report when its config
+names a fitted model (`"decision": {"model": "..."}`), and calls the
+judge only when the decision buys it. On 345 live tau-bench retail runs
+(115 test tasks, real replays of dropped telemetry) it made zero false
+PASS calls and caught every injected policy violation. The worker solved
+only 27% of its tasks, so the cheapest policy halts everything and buys
+no probes, at 1.45 per run against 27.75 for fixed rules. The server,
+replaying the held-out folds, made the same calls. Details and caveats
+are in `experiments/DECISION_METRICS.txt`.
 
 ```sh
-make experiment-decide    # offline, free: policies over recorded results
+make experiment-decide             # offline, free: policies over recorded results
+make experiment-taubench-test      # live, ~$6: 345 tau-bench runs with replays
+make experiment-decide-taubench    # fit on task folds, then serve the held-out folds
 ```
 
 Artifacts are checksummed and versioned. Every results file records
