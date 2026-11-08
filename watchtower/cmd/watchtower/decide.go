@@ -18,18 +18,25 @@ import (
 // artifactCell is the slice of an experiments results cell the decision
 // layer needs; the injected behavior fault is the ground-truth label.
 type artifactCell struct {
-	Fault         *string          `json:"fault"`
-	EvidenceFault *string          `json:"evidence_fault"`
-	Seed          int              `json:"seed"`
-	Model         string           `json:"model"`
-	Run           int              `json:"run"`
-	Judged        bool             `json:"judged"`
-	Findings      []verify.Finding `json:"findings"`
+	Fault         *string `json:"fault"`
+	EvidenceFault *string `json:"evidence_fault"`
+	// Faulty overrides the label when the artifact knows better than the
+	// injected fault, e.g. tau-bench's native task failure.
+	Faulty *bool `json:"faulty"`
+	// ReplayFindings is the report after an actual replay of this run;
+	// null when it was not replayed.
+	ReplayFindings *[]verify.Finding `json:"replayFindings"`
+	Seed           int               `json:"seed"`
+	Model          string            `json:"model"`
+	Run            int               `json:"run"`
+	Judged         bool              `json:"judged"`
+	Findings       []verify.Finding  `json:"findings"`
 }
 
 // loadRuns labels every cell and attaches its replay outcome: the
-// signature of the same behavior cell recorded with clean telemetry,
-// which is what recollecting the trace would have shown.
+// recorded replay when the artifact has one, else the signature of the
+// same behavior cell recorded with clean telemetry, which is what
+// recollecting the trace would have shown.
 func loadRuns(path string) (map[int][]decide.Run, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -64,7 +71,13 @@ func loadRuns(path string) (map[int][]decide.Run, error) {
 			Judged:    c.Judged,
 			JudgeFlag: decide.JudgeFlag(c.Findings),
 		}
-		if gaps {
+		if c.Faulty != nil {
+			r.Faulty = *c.Faulty
+		}
+		switch {
+		case gaps && c.ReplayFindings != nil:
+			r.ReplaySignature, _ = decide.Signature(*c.ReplayFindings)
+		case gaps:
 			r.ReplaySignature = clean[key(c)]
 		}
 		bySeed[c.Seed] = append(bySeed[c.Seed], r)
@@ -243,7 +256,7 @@ func comparePolicies(fit, cal, test []decide.Run, c decide.Costs, alpha float64)
 }
 
 func newDecideCmd() *cobra.Command {
-	var results, fitSeeds, calSeeds, testSeeds, sweep, outFile string
+	var results, fitSeeds, calSeeds, testSeeds, sweep, outFile, saveFile string
 	var alpha float64
 	var rotateSplits bool
 	c := decide.DefaultCosts()
@@ -270,6 +283,17 @@ func newDecideCmd() *cobra.Command {
 				return fmt.Errorf("empty split: fit=%d cal=%d test=%d runs", len(fit), len(cal), len(test))
 			}
 			out.Main = comparePolicies(fit, cal, test, c, alpha)
+			if saveFile != "" {
+				m := decide.Fit(fit)
+				m.CalibrateAccept(cal, c, true, alpha)
+				payload, err := json.MarshalIndent(m, "", "  ")
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(saveFile, payload, 0o644); err != nil {
+					return err
+				}
+			}
 			if sweep != "" {
 				for _, part := range strings.Split(sweep, ",") {
 					miss, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
@@ -309,6 +333,7 @@ func newDecideCmd() *cobra.Command {
 	f.Float64Var(&c.Judge, "judge-cost", c.Judge, "cost of one LLM judge call")
 	f.StringVar(&sweep, "sweep-miss", "", "comma-separated miss costs to sweep (optional)")
 	f.BoolVar(&rotateSplits, "rotate", false, "also average every assignment of seeds to fit/calibrate/test with the same split sizes")
+	f.StringVar(&saveFile, "save", "", "write the model fitted on the fit seeds and gated on the calibration seeds, for serve (optional)")
 	f.StringVar(&outFile, "output", "", "also write the full result as JSON to this file (optional)")
 	_ = cmd.MarkFlagRequired("results")
 	return cmd
