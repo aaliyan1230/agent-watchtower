@@ -230,6 +230,12 @@ func checkToolResults(runSteps []graph.Step, steps map[string]graph.Step, claim 
 		if step.Kind != graph.StepTool {
 			continue
 		}
+		if strings.TrimSpace(step.Tool) == "" {
+			findings = append(findings, evidenceFinding(
+				fmt.Sprintf("tool span %q has no tool name", step.SpanID),
+				[]string{step.SpanID}, model.ToolName, steps, claim,
+			))
+		}
 		if strings.TrimSpace(step.ToolCallID) == "" {
 			findings = append(findings, evidenceFinding(
 				fmt.Sprintf("tool span %q has no call id", step.SpanID),

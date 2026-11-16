@@ -20,6 +20,25 @@ const (
 	GenAIOutputTokens   = "gen_ai.usage.output_tokens"
 	GenAICompletionTime = "gen_ai.usage.completion_time" // ours: ms
 
+	// Names from the current OTel GenAI agent conventions. Producers
+	// that follow the spec emit these instead of the shorter tool.* /
+	// agent.* / gen_ai.system names above and below, so the graph reads
+	// either spelling; missing one would hide a tool call from every
+	// behavior check.
+	GenAIProviderName      = "gen_ai.provider.name"
+	GenAIToolName          = "gen_ai.tool.name"
+	GenAIToolCallID        = "gen_ai.tool.call.id"
+	GenAIToolCallArguments = "gen_ai.tool.call.arguments"
+	GenAIAgentName         = "gen_ai.agent.name"
+	GenAIAgentID           = "gen_ai.agent.id"
+
+	// gen_ai.operation.name values that are not model calls. The spec
+	// also allows invoke_{framework_entrypoint}, so agent operations are
+	// matched by the OpInvokePrefix rather than a closed list.
+	OpExecuteTool  = "execute_tool"
+	OpCreateAgent  = "create_agent"
+	OpInvokePrefix = "invoke_"
+
 	// Tool-call spans.
 	ToolName      = "tool.name"
 	ToolCallID    = "tool.call.id"

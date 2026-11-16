@@ -359,3 +359,73 @@ func TestReconstructIgnoresSelfAndEmptyLinks(t *testing.T) {
 		t.Fatalf("causal edges = %+v, want none", run.CausalEdges)
 	}
 }
+
+func TestStepFromStandardGenAIAttributes(t *testing.T) {
+	tests := []struct {
+		name   string
+		status model.StatusCode
+		attrs  map[string]string
+		want   Step
+	}{
+		{
+			name: "execute_tool with spec names",
+			attrs: map[string]string{
+				model.GenAIOperationName: "execute_tool", model.GenAIToolName: "rm",
+				model.GenAIToolCallID: "call_1", model.GenAIToolCallArguments: `{"path":"/"}`,
+				model.GenAIAgentName: "support-agent",
+			},
+			want: Step{Kind: StepTool, Tool: "rm", ToolCallID: "call_1", ToolArgs: `{"path":"/"}`, ToolOK: true, Agent: "support-agent"},
+		},
+		{
+			name:   "failed execute_tool reads its span status",
+			status: model.StatusError,
+			attrs:  map[string]string{model.GenAIOperationName: "execute_tool", model.GenAIToolName: "search"},
+			want:   Step{Kind: StepTool, Tool: "search", ToolOK: false},
+		},
+		{
+			name:  "execute_tool without a name is still a tool call",
+			attrs: map[string]string{model.GenAIOperationName: "execute_tool"},
+			want:  Step{Kind: StepTool, ToolOK: true},
+		},
+		{
+			name: "harness names win over spec names",
+			attrs: map[string]string{
+				model.ToolName: "search", model.GenAIToolName: "other",
+				model.ToolResultOK: "false", model.AgentName: "worker-a", model.GenAIAgentName: "other",
+			},
+			want: Step{Kind: StepTool, Tool: "search", ToolOK: false, Agent: "worker-a"},
+		},
+		{
+			name: "chat with provider name",
+			attrs: map[string]string{
+				model.GenAIOperationName: "chat", model.GenAIProviderName: "openai",
+				model.GenAIRequestModel: "gpt-x",
+			},
+			want: Step{Kind: StepLLM, System: "openai", Model: "gpt-x"},
+		},
+		{
+			name:  "invoke_agent",
+			attrs: map[string]string{model.GenAIOperationName: "invoke_agent", model.GenAIAgentName: "support-agent"},
+			want:  Step{Kind: StepAgent, Agent: "support-agent"},
+		},
+		{name: "invoke_workflow", attrs: map[string]string{model.GenAIOperationName: "invoke_workflow"}, want: Step{Kind: StepAgent}},
+		{name: "framework entrypoint", attrs: map[string]string{model.GenAIOperationName: "invoke_crew"}, want: Step{Kind: StepAgent}},
+		{name: "create_agent", attrs: map[string]string{model.GenAIOperationName: "create_agent"}, want: Step{Kind: StepAgent}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := tt.status
+			if status == "" {
+				status = model.StatusOK
+			}
+			got := stepFrom(&model.Span{TraceID: "t", SpanID: "s", Status: status, Attributes: tt.attrs}, 1)
+			w := tt.want
+			if got.Kind != w.Kind || got.Tool != w.Tool || got.ToolCallID != w.ToolCallID ||
+				got.ToolArgs != w.ToolArgs || got.ToolOK != w.ToolOK || got.Agent != w.Agent ||
+				got.System != w.System || got.Model != w.Model {
+				t.Fatalf("stepFrom = kind=%s tool=%q id=%q args=%q ok=%v agent=%q system=%q model=%q, want %+v",
+					got.Kind, got.Tool, got.ToolCallID, got.ToolArgs, got.ToolOK, got.Agent, got.System, got.Model, w)
+			}
+		})
+	}
+}

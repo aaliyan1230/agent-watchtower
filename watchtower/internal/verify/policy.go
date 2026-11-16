@@ -14,7 +14,9 @@ type Policy struct {
 	AllowedTools []string `json:"allowedTools"`
 }
 
-// CheckPolicy flags every tool call outside the allowlist.
+// CheckPolicy flags every tool call outside the allowlist. A tool span
+// with no name is skipped: missing telemetry is an evidence gap
+// (tool_pairing), never proof that a forbidden tool ran.
 func CheckPolicy(run *graph.Run, p Policy) []Finding {
 	if len(p.AllowedTools) == 0 {
 		return nil
@@ -25,7 +27,7 @@ func CheckPolicy(run *graph.Run, p Policy) []Finding {
 	}
 	var out []Finding
 	for _, step := range run.ToolCalls() {
-		if allowed[step.Tool] {
+		if step.Tool == "" || allowed[step.Tool] {
 			continue
 		}
 		out = append(out, Finding{

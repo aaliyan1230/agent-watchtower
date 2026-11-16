@@ -80,3 +80,34 @@ func TestVerifyCommandMissingFile(t *testing.T) {
 		t.Fatal("expected error for missing trace file")
 	}
 }
+
+// A trace written with the OTel GenAI agent conventions (gen_ai.tool.name,
+// execute_tool, invoke_agent) must see the same tool call a harness trace
+// would; reading it as an LLM span turned a forbidden rm into a PASS.
+func TestVerifyCommandStandardSemconvTrace(t *testing.T) {
+	out, err := runVerify(t, "verify",
+		"--trace-file", "../../testdata/semconv_trace.json",
+		"--config", "../../testdata/config.json")
+	if err != nil {
+		t.Fatalf("verify: %v\n%s", err, out)
+	}
+	var r struct {
+		Verdict string `json:"verdict"`
+		Budget  struct {
+			LLMCallCount  int `json:"llmCallCount"`
+			ToolCallCount int `json:"toolCallCount"`
+		} `json:"budget"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out)
+	}
+	if r.Verdict != "FAIL" {
+		t.Fatalf("verdict = %q, want FAIL\n%s", r.Verdict, out)
+	}
+	if r.Budget.LLMCallCount != 2 || r.Budget.ToolCallCount != 1 {
+		t.Errorf("budget llm=%d tool=%d, want 2 and 1", r.Budget.LLMCallCount, r.Budget.ToolCallCount)
+	}
+	if !strings.Contains(out, `tool \"rm\" is not on the allowlist`) {
+		t.Errorf("report missing the rm policy finding:\n%s", out)
+	}
+}

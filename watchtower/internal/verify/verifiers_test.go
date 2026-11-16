@@ -29,6 +29,7 @@ func TestCheckPolicy(t *testing.T) {
 		{name: "disallowed tool", steps: []graph.Step{toolStep("s1", "write", `{"f":"y"}`)}, want: 1, wantFrag: `"write"`},
 		{name: "mixed", steps: []graph.Step{toolStep("s1", "search", "{}"), toolStep("s2", "rm", `{"p":"/"}`)}, want: 1, wantFrag: "rm"},
 		{name: "no policy configured", steps: []graph.Step{toolStep("s1", "anything", "{}")}},
+		{name: "unnamed tool is a gap, not a violation", steps: []graph.Step{toolStep("s1", "", "{}")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
