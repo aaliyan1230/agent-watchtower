@@ -111,6 +111,11 @@ type decideResult struct {
 	Policies  []decide.Metrics `json:"policies"`
 }
 
+type streamEval struct {
+	Name  string             `json:"name"`
+	State decide.StreamState `json:"state"`
+}
+
 type decideOutput struct {
 	Results   string         `json:"results"`
 	Alpha     float64        `json:"alpha"`
@@ -123,6 +128,7 @@ type decideOutput struct {
 	Main      decideResult   `json:"main"`
 	Sweep     []decideResult `json:"sweep,omitempty"`
 	Rotation  *rotation      `json:"rotation,omitempty"`
+	Stream    []streamEval   `json:"stream,omitempty"`
 }
 
 // rotation averages every assignment of the seeds to fit, calibrate and
@@ -255,9 +261,50 @@ func comparePolicies(fit, cal, test []decide.Run, c decide.Costs, alpha float64)
 	return out
 }
 
+func evalStream(m *decide.Model, c decide.Costs, test []decide.Run, nullRate, alpha float64) ([]streamEval, error) {
+	faultsEP, err := decide.NewEProcess(decide.EProcessConfig{NullRate: nullRate, Alpha: alpha})
+	if err != nil {
+		return nil, err
+	}
+	accFaultEP, err := decide.NewEProcess(decide.EProcessConfig{NullRate: alpha, Alpha: alpha})
+	if err != nil {
+		return nil, err
+	}
+	riskEP, err := decide.NewEProcess(decide.EProcessConfig{NullRate: nullRate, Alpha: alpha, Signal: decide.SignalRisk})
+	if err != nil {
+		return nil, err
+	}
+	policy := decide.BayesPolicy("bayes", m, c, true)
+	for _, r := range test {
+		o := policy.Act(r)
+		f := 0.0
+		if r.Faulty {
+			f = 1
+		}
+		af := 0.0
+		if o.Final == decide.Accept && r.Faulty {
+			af = 1
+		}
+		if _, err := faultsEP.Observe(f); err != nil {
+			return nil, err
+		}
+		if _, err := accFaultEP.Observe(af); err != nil {
+			return nil, err
+		}
+		if _, err := riskEP.Observe(o.AcceptRisk); err != nil {
+			return nil, err
+		}
+	}
+	return []streamEval{
+		{Name: "faults", State: faultsEP.State()},
+		{Name: "accepted-faulty", State: accFaultEP.State()},
+		{Name: "risk", State: riskEP.State()},
+	}, nil
+}
+
 func newDecideCmd() *cobra.Command {
 	var results, fitSeeds, calSeeds, testSeeds, sweep, outFile, saveFile string
-	var alpha float64
+	var alpha, streamNull float64
 	var rotateSplits bool
 	c := decide.DefaultCosts()
 	cmd := &cobra.Command{
@@ -283,15 +330,23 @@ func newDecideCmd() *cobra.Command {
 				return fmt.Errorf("empty split: fit=%d cal=%d test=%d runs", len(fit), len(cal), len(test))
 			}
 			out.Main = comparePolicies(fit, cal, test, c, alpha)
-			if saveFile != "" {
+			if saveFile != "" || streamNull > 0 {
 				m := decide.Fit(fit)
 				m.CalibrateAccept(cal, c, true, alpha)
-				payload, err := json.MarshalIndent(m, "", "  ")
-				if err != nil {
-					return err
+				if saveFile != "" {
+					payload, err := json.MarshalIndent(m, "", "  ")
+					if err != nil {
+						return err
+					}
+					if err := os.WriteFile(saveFile, payload, 0o644); err != nil {
+						return err
+					}
 				}
-				if err := os.WriteFile(saveFile, payload, 0o644); err != nil {
-					return err
+				if streamNull > 0 {
+					out.Stream, err = evalStream(m, c, test, streamNull, alpha)
+					if err != nil {
+						return err
+					}
 				}
 			}
 			if sweep != "" {
@@ -333,6 +388,7 @@ func newDecideCmd() *cobra.Command {
 	f.Float64Var(&c.Judge, "judge-cost", c.Judge, "cost of one LLM judge call")
 	f.StringVar(&sweep, "sweep-miss", "", "comma-separated miss costs to sweep (optional)")
 	f.BoolVar(&rotateSplits, "rotate", false, "also average every assignment of seeds to fit/calibrate/test with the same split sizes")
+	f.Float64Var(&streamNull, "stream-null", 0, "run anytime-valid e-process halting over the test stream under H0: mean <= p0 (optional)")
 	f.StringVar(&saveFile, "save", "", "write the model fitted on the fit seeds and gated on the calibration seeds, for serve (optional)")
 	f.StringVar(&outFile, "output", "", "also write the full result as JSON to this file (optional)")
 	_ = cmd.MarkFlagRequired("results")
@@ -374,6 +430,18 @@ func renderDecide(w io.Writer, out decideOutput) error {
 		for _, m := range r.Mean {
 			fmt.Fprintf(&b, "%-16s%10.3f%15.2f%%%19.2f%%%12.1f%14.1f%11.1f\n",
 				m.Policy, m.CostPerRun, 100*m.AcceptedFaulty, 100*r.MaxAcceptedFaulty[m.Policy], m.AcceptPer100, m.EscalatePer100, m.ProbePer100)
+		}
+	}
+	if len(out.Stream) > 0 {
+		fmt.Fprintf(&b, "\nanytime-valid streaming e-process (halt at wealth >= 1/alpha = %g)\n", 1/out.Alpha)
+		fmt.Fprintf(&b, "%-16s%8s%8s%12s%10s%10s\n", "stream", "null", "mean", "maxWealth", "halted", "haltStep")
+		for _, s := range out.Stream {
+			step := "-"
+			if s.State.Halted {
+				step = strconv.Itoa(s.State.HaltStep)
+			}
+			fmt.Fprintf(&b, "%-16s%8.3f%8.3f%12.3g%10v%10s\n",
+				s.Name, s.State.NullRate, s.State.Mean, s.State.MaxWealth, s.State.Halted, step)
 		}
 	}
 	_, err := io.WriteString(w, b.String())

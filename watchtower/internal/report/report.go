@@ -16,7 +16,7 @@ import (
 // finding schema, budget fields. Bump it when any of those change.
 // artifacts carry it so results from different protocol versions are
 // never compared silently.
-const ProtocolVersion = "0.14"
+const ProtocolVersion = "0.15"
 
 // Verdict is the run-level outcome an operator acts on.
 type Verdict string
@@ -65,15 +65,31 @@ type Report struct {
 // server ran itself. Replaying the trace is the client's move, so a
 // replay also names the Fallback to take when no recollection exists.
 type Decision struct {
-	Signature string             `json:"signature"`
-	Risk      float64            `json:"risk"`
-	Posterior *float64           `json:"posterior,omitempty"`
-	First     string             `json:"first"`
-	Action    string             `json:"action"`
-	Fallback  string             `json:"fallback,omitempty"`
-	Expected  map[string]float64 `json:"expected"`
-	Gated     bool               `json:"gated,omitempty"`
-	Threshold float64            `json:"threshold"`
+	Signature    string             `json:"signature"`
+	Risk         float64            `json:"risk"`
+	Posterior    *float64           `json:"posterior,omitempty"`
+	First        string             `json:"first"`
+	Action       string             `json:"action"`
+	Fallback     string             `json:"fallback,omitempty"`
+	Expected     map[string]float64 `json:"expected"`
+	Gated        bool               `json:"gated,omitempty"`
+	Threshold    float64            `json:"threshold"`
+	StreamHalted bool               `json:"streamHalted,omitempty"`
+	Stream       *StreamState       `json:"stream,omitempty"`
+}
+
+// StreamState captures the anytime-valid e-process state after this run.
+type StreamState struct {
+	Signal    string  `json:"signal,omitempty"`
+	NullRate  float64 `json:"nullRate"`
+	Alpha     float64 `json:"alpha"`
+	Threshold float64 `json:"threshold"`
+	Steps     int     `json:"steps"`
+	Mean      float64 `json:"mean"`
+	Wealth    float64 `json:"wealth"`
+	MaxWealth float64 `json:"maxWealth"`
+	Halted    bool    `json:"halted"`
+	HaltStep  int     `json:"haltStep,omitempty"`
 }
 
 // Build assembles a Report from a reconstructed run and its findings.

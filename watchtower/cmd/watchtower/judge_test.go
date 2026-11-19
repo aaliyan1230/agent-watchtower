@@ -34,7 +34,7 @@ func TestServeWithJudge(t *testing.T) {
 	}
 	cfg.Judge = j
 
-	mux := newServeMux(cfg, report.NewStore(time.Minute), nil)
+	mux := newServeMux(cfg, report.NewStore(time.Minute), nil, nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 

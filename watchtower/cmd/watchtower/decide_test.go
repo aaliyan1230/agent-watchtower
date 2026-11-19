@@ -104,6 +104,40 @@ func TestDecideCommand(t *testing.T) {
 	}
 }
 
+func TestDecideCommandStream(t *testing.T) {
+	outFile := filepath.Join(t.TempDir(), "decide-stream.json")
+	text, err := runVerify(t, "decide", "--results", writeArtifact(t), "--stream-null", "0.05", "--output", outFile)
+	if err != nil {
+		t.Fatalf("decide --stream-null: %v\n%s", err, text)
+	}
+	for _, want := range []string{"anytime-valid streaming e-process", "faults", "accepted-faulty", "risk"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("output lacks %q:\n%s", want, text)
+		}
+	}
+	raw, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out decideOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Stream) != 3 {
+		t.Fatalf("stream evaluations = %d, want 3", len(out.Stream))
+	}
+	byName := map[string]streamEval{}
+	for _, s := range out.Stream {
+		byName[s.Name] = s
+	}
+	if !byName["faults"].State.Halted {
+		t.Fatalf("faults stream (50%% faulty vs 5%% null) must halt: %+v", byName["faults"])
+	}
+	if byName["accepted-faulty"].State.Halted {
+		t.Fatalf("accepted-faulty stream (0%% accepted faults) must not halt: %+v", byName["accepted-faulty"])
+	}
+}
+
 func TestDecideCommandRejectsEmptySplit(t *testing.T) {
 	if _, err := runVerify(t, "decide", "--results", writeArtifact(t), "--test-seeds", "9"); err == nil {
 		t.Fatal("a split with no runs must fail")
