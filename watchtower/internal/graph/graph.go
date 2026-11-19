@@ -286,7 +286,9 @@ func tracesClosed(spans []*model.Span) bool {
 
 // stepFrom classifies a span and copies the attributes verifiers care
 // about. Classification priority is tool > llm > agent: a span stamped
-// with both tool.name and gen_ai attributes is a tool call.
+// with both a tool name and gen_ai attributes is a tool call. A
+// gen_ai.operation.name only means an LLM call when it is a model
+// operation; execute_tool and the agent operations are not.
 func stepFrom(s *model.Span, order int) Step {
 	st := Step{
 		Order:     order,
@@ -300,24 +302,29 @@ func stepFrom(s *model.Span, order int) Step {
 	}
 	st.Attributes = cloneAttributes(s.Attributes)
 	st.Events = append([]model.Event(nil), s.Events...)
-	st.Agent, _ = s.Attr(model.AgentName)
+	st.Agent, _ = firstAttr(s, model.AgentName, model.GenAIAgentName)
 	st.Contract, _ = s.Attr(model.WatchtowerContract)
 	st.Output, _ = s.Attr(model.WatchtowerOutput)
 
-	if tool, ok := s.Attr(model.ToolName); ok {
+	op, _ := s.Attr(model.GenAIOperationName)
+	if tool, ok := firstAttr(s, model.ToolName, model.GenAIToolName); ok || op == model.OpExecuteTool {
 		st.Kind = StepTool
 		st.Tool = tool
-		st.ToolCallID, _ = s.Attr(model.ToolCallID)
+		st.ToolCallID, _ = firstAttr(s, model.ToolCallID, model.GenAIToolCallID)
 		st.ToolCallIDs = parseToolCallIDs(s)
-		st.ToolOK, _ = s.AttrBool(model.ToolResultOK)
-		st.ToolArgs, _ = s.Attr(model.WatchtowerToolArgs)
+		if ok, valid := s.AttrBool(model.ToolResultOK); valid {
+			st.ToolOK = ok
+		} else {
+			st.ToolOK = s.Status != model.StatusError
+		}
+		st.ToolArgs, _ = firstAttr(s, model.WatchtowerToolArgs, model.GenAIToolCallArguments)
 		return st
 	}
-	if op, ok := s.Attr(model.GenAIOperationName); ok && op != "" {
+	if op != "" && op != model.OpCreateAgent && !strings.HasPrefix(op, model.OpInvokePrefix) {
 		st.Kind = StepLLM
 		st.Model, _ = s.Attr(model.GenAIRequestModel)
 		st.ResponseModel, _ = s.Attr(model.GenAIResponseModel)
-		st.System, _ = s.Attr(model.GenAISystem)
+		st.System, _ = firstAttr(s, model.GenAISystem, model.GenAIProviderName)
 		st.ToolCallIDs = parseToolCallIDs(s)
 		st.InputTokens, _ = s.AttrInt(model.GenAIInputTokens)
 		st.OutputTokens, _ = s.AttrInt(model.GenAIOutputTokens)
@@ -325,6 +332,20 @@ func stepFrom(s *model.Span, order int) Step {
 	}
 	st.Kind = StepAgent
 	return st
+}
+
+// firstAttr returns the first non-empty value among names, and whether
+// any of them was present at all.
+func firstAttr(s *model.Span, names ...string) (string, bool) {
+	present := false
+	for _, name := range names {
+		v, ok := s.Attr(name)
+		if ok && v != "" {
+			return v, true
+		}
+		present = present || ok
+	}
+	return "", present
 }
 
 func cloneAttributes(attrs map[string]string) map[string]string {

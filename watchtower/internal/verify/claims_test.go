@@ -115,6 +115,20 @@ func TestEvidenceFindingsCarryClaimAndAction(t *testing.T) {
 	}
 }
 
+func TestToolPairingRequiresToolName(t *testing.T) {
+	run := &graph.Run{Steps: []graph.Step{{
+		SpanID: "t1", Kind: graph.StepTool, ToolCallID: "c1",
+		Attributes: map[string]string{"tool.result.ok": "true"},
+	}}}
+	findings := CheckEvidence(run, EvidenceObligations{RequireToolResults: true})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want one tool name gap", findings)
+	}
+	if f := findings[0]; f.Claim != "tool_pairing" || f.Kind != FindingEvidenceGap || f.Value != "tool.name" {
+		t.Fatalf("finding = %+v", f)
+	}
+}
+
 func TestTraceClosedObligation(t *testing.T) {
 	unclosed := &graph.Run{RootSpanID: "s0", Steps: []graph.Step{{SpanID: "s0", Kind: graph.StepAgent, Name: "agent.run"}}}
 

@@ -144,8 +144,8 @@ func TestVerifyEvidenceObligationsAcceptCompleteRun(t *testing.T) {
 			},
 			{
 				SpanID: "tool", ParentID: "root", Name: "tool.call", Kind: graph.StepTool,
-				ToolCallID: "call-1", StartTime: base.Add(2 * time.Second), EndTime: base.Add(3 * time.Second),
-				Attributes: map[string]string{model.ToolCallID: "call-1", model.ToolResultOK: "true"},
+				Tool: "search", ToolCallID: "call-1", StartTime: base.Add(2 * time.Second), EndTime: base.Add(3 * time.Second),
+				Attributes: map[string]string{model.ToolName: "search", model.ToolCallID: "call-1", model.ToolResultOK: "true"},
 			},
 		},
 	}
