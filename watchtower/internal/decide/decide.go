@@ -142,6 +142,22 @@ type JudgeCounts struct {
 	TN int `json:"tn"`
 }
 
+func (j JudgeCounts) total() int { return j.TP + j.FN + j.FP + j.TN }
+
+func addJudge(j JudgeCounts, faulty, flag bool) JudgeCounts {
+	switch {
+	case faulty && flag:
+		j.TP++
+	case faulty:
+		j.FN++
+	case flag:
+		j.FP++
+	default:
+		j.TN++
+	}
+	return j
+}
+
 // priorStrength is how many pseudo-runs of the verdict-level rate a
 // signature's own estimate starts from, so a signature seen twice does
 // not claim certainty.
@@ -152,10 +168,11 @@ const priorStrength = 2
 // accept gate. It is plain data so a fitted model can be saved and
 // loaded by the server.
 type Model struct {
-	Signatures map[string]Counts         `json:"signatures"`
-	Verdicts   map[string]Counts         `json:"verdicts"`
-	Replays    map[string]map[string]int `json:"replays"`
-	JudgeStats JudgeCounts               `json:"judge"`
+	Signatures     map[string]Counts         `json:"signatures"`
+	Verdicts       map[string]Counts         `json:"verdicts"`
+	Replays        map[string]map[string]int `json:"replays"`
+	JudgeStats     JudgeCounts               `json:"judge"`
+	JudgeByVerdict map[string]JudgeCounts    `json:"judgeByVerdict,omitempty"`
 	// Threshold is the accept gate: accept only at risk <= Threshold.
 	// 1 leaves the gate open; a negative value closes it.
 	Threshold float64 `json:"threshold"`
@@ -167,10 +184,11 @@ type Model struct {
 
 func Fit(runs []Run) *Model {
 	m := &Model{
-		Signatures: map[string]Counts{},
-		Verdicts:   map[string]Counts{},
-		Replays:    map[string]map[string]int{},
-		Threshold:  1,
+		Signatures:     map[string]Counts{},
+		Verdicts:       map[string]Counts{},
+		Replays:        map[string]map[string]int{},
+		JudgeByVerdict: map[string]JudgeCounts{},
+		Threshold:      1,
 	}
 	for _, r := range runs {
 		add := func(c Counts) Counts {
@@ -190,16 +208,8 @@ func Fit(runs []Run) *Model {
 			m.Replays[r.Signature][r.ReplaySignature]++
 		}
 		if r.Judged {
-			switch {
-			case r.Faulty && r.JudgeFlag:
-				m.JudgeStats.TP++
-			case r.Faulty:
-				m.JudgeStats.FN++
-			case r.JudgeFlag:
-				m.JudgeStats.FP++
-			default:
-				m.JudgeStats.TN++
-			}
+			m.JudgeStats = addJudge(m.JudgeStats, r.Faulty, r.JudgeFlag)
+			m.JudgeByVerdict[v] = addJudge(m.JudgeByVerdict[v], r.Faulty, r.JudgeFlag)
 		}
 	}
 	return m
@@ -213,19 +223,40 @@ func (m *Model) Risk(sig string) float64 {
 }
 
 func (m *Model) hasJudge() bool {
-	j := m.JudgeStats
-	return j.TP+j.FN+j.FP+j.TN > 0
+	if m.JudgeStats.total() > 0 {
+		return true
+	}
+	for _, j := range m.JudgeByVerdict {
+		if j.total() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
-// judgeRates are Laplace-smoothed true and false positive rates.
-func (m *Model) judgeRates() (tpr, fpr float64) {
+// JudgeRates returns the judge's estimated true and false positive rates
+// for sig's deterministic verdict, shrunk toward the other verdicts'
+// pooled rates (themselves Laplace-smoothed toward one half) so no
+// observation is counted twice in both prior and likelihood.
+func (m *Model) JudgeRates(sig string) (tpr, fpr float64) {
 	j := m.JudgeStats
-	return float64(j.TP+1) / float64(j.TP+j.FN+2), float64(j.FP+1) / float64(j.FP+j.TN+2)
+	v := m.JudgeByVerdict[verdictOf(sig)]
+	rest := JudgeCounts{
+		TP: max(0, j.TP-v.TP),
+		FN: max(0, j.FN-v.FN),
+		FP: max(0, j.FP-v.FP),
+		TN: max(0, j.TN-v.TN),
+	}
+	priorTPR := Counts{Faulty: rest.TP, Total: rest.TP + rest.FN}.rate(0.5, priorStrength)
+	priorFPR := Counts{Faulty: rest.FP, Total: rest.FP + rest.TN}.rate(0.5, priorStrength)
+	return Counts{Faulty: v.TP, Total: v.TP + v.FN}.rate(priorTPR, priorStrength),
+		Counts{Faulty: v.FP, Total: v.FP + v.TN}.rate(priorFPR, priorStrength)
 }
 
-// JudgePosterior updates a risk on the judge's answer by Bayes' rule.
-func (m *Model) JudgePosterior(risk float64, flagged bool) float64 {
-	tpr, fpr := m.judgeRates()
+// JudgePosterior updates a risk on the judge's answer by Bayes' rule,
+// using the judge's error rates for sig's deterministic verdict.
+func (m *Model) JudgePosterior(sig string, risk float64, flagged bool) float64 {
+	tpr, fpr := m.JudgeRates(sig)
 	if flagged {
 		return risk * tpr / (risk*tpr + (1-risk)*fpr)
 	}
@@ -289,11 +320,11 @@ func (m *Model) Decide(obs Observation, c Costs, probes bool) Decision {
 		expected[Replay] = c.Replay + after
 	}
 	if probes && obs.CanJudge && m.hasJudge() {
-		tpr, fpr := m.judgeRates()
+		tpr, fpr := m.JudgeRates(obs.Signature)
 		pFlag := risk*tpr + (1-risk)*fpr
 		expected[Judge] = c.Judge +
-			pFlag*minCost(terminalCosts(m.JudgePosterior(risk, true), c)) +
-			(1-pFlag)*minCost(terminalCosts(m.JudgePosterior(risk, false), c))
+			pFlag*minCost(terminalCosts(m.JudgePosterior(obs.Signature, risk, true), c)) +
+			(1-pFlag)*minCost(terminalCosts(m.JudgePosterior(obs.Signature, risk, false), c))
 	}
 	return m.gate(Decision{Action: cheapest(expected, ""), Risk: risk, Expected: expected})
 }

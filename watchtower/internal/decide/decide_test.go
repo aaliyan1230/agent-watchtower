@@ -132,15 +132,59 @@ func TestDecide(t *testing.T) {
 
 func TestJudgePosterior(t *testing.T) {
 	m := fixture()
-	tpr, fpr := m.judgeRates()
+	// Only FLAGGED has judged runs (5 TP, 0 FN, 0 FP, 5 TN), so leave-one-verdict-out
+	// prior is 0.5 and FLAGGED gets exact Laplace rates 6/7 and 1/7 without double-counting.
+	tpr, fpr := m.JudgeRates(looped)
 	if !near(tpr, 6.0/7) || !near(fpr, 1.0/7) {
-		t.Fatalf("judgeRates() = %v, %v", tpr, fpr)
+		t.Fatalf("JudgeRates(%q) = %v, %v; want 6/7, 1/7", looped, tpr, fpr)
 	}
-	if got := m.JudgePosterior(0.5, true); !near(got, 6.0/7) {
+	if got := m.JudgePosterior(looped, 0.5, true); !near(got, 6.0/7) {
 		t.Errorf("flagged posterior = %v", got)
 	}
-	if got := m.JudgePosterior(0.5, false); !near(got, 1.0/7) {
+	if got := m.JudgePosterior(looped, 0.5, false); !near(got, 1.0/7) {
 		t.Errorf("cleared posterior = %v", got)
+	}
+	// An unseen verdict borrows strength from all other verdicts (the pooled rates).
+	pTPR, pFPR := m.JudgeRates(pass)
+	if !near(pTPR, 6.0/7) || !near(pFPR, 1.0/7) {
+		t.Fatalf("unseen verdict JudgeRates(%q) = %v, %v; want pooled 6/7, 1/7", pass, pTPR, pFPR)
+	}
+}
+
+func TestJudgeRatesPerVerdictPreventsPoolingOverstatement(t *testing.T) {
+	// The judge flags obvious FAIL runs reliably, yet is pure coin-flip on PASS runs
+	// (30% fault rate on PASS: expected accept=30, halt=7, escalate=5).
+	// A pooled estimate would credit PASS with FAIL's high TPR and wrongly buy the judge;
+	// per-verdict rates see that the judge adds no information on PASS and skip it.
+	var runs []Run
+	runs = append(runs, repeat(100, Run{Signature: fail, Faulty: true, Judged: true, JudgeFlag: true})...)
+	runs = append(runs, repeat(15, Run{Signature: pass, Faulty: true, Judged: true, JudgeFlag: true})...)
+	runs = append(runs, repeat(15, Run{Signature: pass, Faulty: true, Judged: true, JudgeFlag: false})...)
+	runs = append(runs, repeat(35, Run{Signature: pass, Faulty: false, Judged: true, JudgeFlag: true})...)
+	runs = append(runs, repeat(35, Run{Signature: pass, Faulty: false, Judged: true, JudgeFlag: false})...)
+
+	m := Fit(runs)
+	passTPR, passFPR := m.JudgeRates(pass)
+	failTPR, _ := m.JudgeRates(fail)
+	if failTPR <= 0.9 {
+		t.Fatalf("FAIL TPR = %v, want > 0.9", failTPR)
+	}
+	if math.Abs(passTPR-0.5) > 0.06 || math.Abs(passFPR-0.5) > 0.06 {
+		t.Fatalf("PASS judge rates = (%v, %v), want near (0.5, 0.5)", passTPR, passFPR)
+	}
+	d := m.Decide(Observation{Signature: pass, CanJudge: true}, DefaultCosts(), true)
+	if d.Action == Judge {
+		t.Fatalf("per-verdict model wrongly bought a coin-flip judge on PASS: %+v", d)
+	}
+
+	// Legacy saved models without JudgeByVerdict fall back to pooled JudgeStats.
+	legacy := *m
+	legacy.JudgeByVerdict = nil
+	ltpr, lfpr := legacy.JudgeRates(pass)
+	wantPooledTPR := float64(115+1) / float64(130+2)
+	wantPooledFPR := float64(35+1) / float64(70+2)
+	if !near(ltpr, wantPooledTPR) || !near(lfpr, wantPooledFPR) {
+		t.Fatalf("legacy fallback rates = (%v, %v), want (%v, %v)", ltpr, lfpr, wantPooledTPR, wantPooledFPR)
 	}
 }
 

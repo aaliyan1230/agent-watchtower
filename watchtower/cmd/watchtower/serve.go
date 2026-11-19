@@ -119,7 +119,7 @@ func verifyAndDecide(run *graph.Run, cfg verify.Config, m *decide.Model) (*repor
 		judged = true
 		posterior := d.Risk
 		if !hasJudgeError(js) {
-			posterior = m.JudgePosterior(d.Risk, decide.JudgeFlag(js))
+			posterior = m.JudgePosterior(sig, d.Risk, decide.JudgeFlag(js))
 		}
 		s := m.Settle(posterior, m.Costs)
 		rec.Posterior, rec.Action, rec.Gated = &posterior, string(s.Action), s.Gated

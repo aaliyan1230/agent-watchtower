@@ -39,7 +39,7 @@ func BayesPolicy(name string, m *Model, c Costs, probes bool) Policy {
 			s = m.Settle(m.Risk(r.ReplaySignature), c)
 		case Judge:
 			o.Cost += c.Judge
-			s = m.Settle(m.JudgePosterior(d.Risk, r.JudgeFlag), c)
+			s = m.Settle(m.JudgePosterior(r.Signature, d.Risk, r.JudgeFlag), c)
 		}
 		if s.Action != "" {
 			o.Final, o.AcceptRisk = s.Action, s.Risk
