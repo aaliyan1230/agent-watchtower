@@ -33,16 +33,16 @@ type DMNInputData struct {
 }
 
 type DMNDecision struct {
-	ID                      string                   `xml:"id,attr"`
-	Name                    string                   `xml:"name,attr"`
-	Description             string                   `xml:"description,omitempty"`
-	InformationRequirements []DMNInfoRequirement     `xml:"informationRequirement,omitempty"`
-	DecisionTable           DMNDecisionTable         `xml:"decisionTable"`
+	ID                      string               `xml:"id,attr"`
+	Name                    string               `xml:"name,attr"`
+	Description             string               `xml:"description,omitempty"`
+	InformationRequirements []DMNInfoRequirement `xml:"informationRequirement,omitempty"`
+	DecisionTable           DMNDecisionTable     `xml:"decisionTable"`
 }
 
 type DMNInfoRequirement struct {
-	ID            string          `xml:"id,attr"`
-	RequiredInput DMNElementRef   `xml:"requiredInput"`
+	ID            string        `xml:"id,attr"`
+	RequiredInput DMNElementRef `xml:"requiredInput"`
 }
 
 type DMNElementRef struct {
@@ -58,9 +58,9 @@ type DMNDecisionTable struct {
 }
 
 type DMNInput struct {
-	ID              string            `xml:"id,attr"`
-	Label           string            `xml:"label,attr,omitempty"`
-	InputExpression DMNInputExpr      `xml:"inputExpression"`
+	ID              string       `xml:"id,attr"`
+	Label           string       `xml:"label,attr,omitempty"`
+	InputExpression DMNInputExpr `xml:"inputExpression"`
 }
 
 type DMNInputExpr struct {

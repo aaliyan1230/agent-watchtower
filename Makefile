@@ -72,11 +72,11 @@ experiment-agreement: ## inter-judge kappa across providers
 	.venv/bin/python -m experiments.analyze --results artifacts/results-live.json --compare artifacts/results-live-deepseek.json --compare artifacts/results-live-kimi.json
 
 experiment-decide: ## offline decision layer: cost-aware policy vs fixed rules over recorded results (free)
-	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-fa.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-fa.json
-	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-live-full.json --rotate --sweep-miss 5,10,20,50,100,200,500 --output ../artifacts/results-decide-live.json
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-fa.json --rotate --sweep-miss 5,10,20,50,100,200,500 --stream-null 0.05 --dmn ../artifacts/policy-fa.dmn --output ../artifacts/results-decide-fa.json
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-live-full.json --rotate --sweep-miss 5,10,20,50,100,200,500 --stream-null 0.05 --dmn ../artifacts/policy-live.dmn --output ../artifacts/results-decide-live.json
 
 experiment-decide-taubench: ## decision layer on tau-bench task folds, then the held-out folds through the server (judge only when bought)
-	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-taubench-test.json --rotate --sweep-miss 5,10,20,50,100,200,500 --save ../artifacts/decide-model-taubench.json --output ../artifacts/results-decide-taubench.json
+	cd watchtower && go run ./cmd/watchtower decide --results ../artifacts/results-taubench-test.json --rotate --sweep-miss 5,10,20,50,100,200,500 --stream-null 0.05 --save ../artifacts/decide-model-taubench.json --dmn ../artifacts/policy-taubench.dmn --output ../artifacts/results-decide-taubench.json
 	.venv/bin/python -m experiments.decide_replay --model artifacts/decide-model-taubench.json
 
 experiment-causal: ## offline CausalTrace sweep: canonical checksums, flips, premature passes
