@@ -303,7 +303,7 @@ func evalStream(m *decide.Model, c decide.Costs, test []decide.Run, nullRate, al
 }
 
 func newDecideCmd() *cobra.Command {
-	var results, fitSeeds, calSeeds, testSeeds, sweep, outFile, saveFile string
+	var results, modelFile, fitSeeds, calSeeds, testSeeds, sweep, outFile, saveFile, dmnFile string
 	var alpha, streamNull float64
 	var rotateSplits bool
 	c := decide.DefaultCosts()
@@ -311,6 +311,28 @@ func newDecideCmd() *cobra.Command {
 		Use:   "decide",
 		Short: "evaluate the decision layer offline over an experiment results artifact",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if results == "" && modelFile == "" {
+				return fmt.Errorf("one of --results or --model is required")
+			}
+			if modelFile != "" && results == "" {
+				raw, err := os.ReadFile(modelFile)
+				if err != nil {
+					return err
+				}
+				var m decide.Model
+				if err := json.Unmarshal(raw, &m); err != nil {
+					return fmt.Errorf("%s: %w", modelFile, err)
+				}
+				dmn, err := m.ExportDMN()
+				if err != nil {
+					return err
+				}
+				if dmnFile == "" || dmnFile == "-" {
+					_, err = cmd.OutOrStdout().Write(dmn)
+					return err
+				}
+				return os.WriteFile(dmnFile, dmn, 0o644)
+			}
 			bySeed, err := loadRuns(results)
 			if err != nil {
 				return err
@@ -330,7 +352,7 @@ func newDecideCmd() *cobra.Command {
 				return fmt.Errorf("empty split: fit=%d cal=%d test=%d runs", len(fit), len(cal), len(test))
 			}
 			out.Main = comparePolicies(fit, cal, test, c, alpha)
-			if saveFile != "" || streamNull > 0 {
+			if saveFile != "" || dmnFile != "" || streamNull > 0 {
 				m := decide.Fit(fit)
 				m.CalibrateAccept(cal, c, true, alpha)
 				if saveFile != "" {
@@ -339,6 +361,15 @@ func newDecideCmd() *cobra.Command {
 						return err
 					}
 					if err := os.WriteFile(saveFile, payload, 0o644); err != nil {
+						return err
+					}
+				}
+				if dmnFile != "" {
+					dmn, err := m.ExportDMN()
+					if err != nil {
+						return err
+					}
+					if err := os.WriteFile(dmnFile, dmn, 0o644); err != nil {
 						return err
 					}
 				}
@@ -376,7 +407,8 @@ func newDecideCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&results, "results", "", "experiments results artifact (required)")
+	f.StringVar(&results, "results", "", "experiments results artifact (required unless --model is given)")
+	f.StringVar(&modelFile, "model", "", "saved decision model JSON to export as DMN without refitting (optional)")
 	f.Float64Var(&alpha, "alpha", 0.05, "bound on the rate of accepted faulty runs")
 	f.StringVar(&fitSeeds, "fit-seeds", "1,2", "seeds the risk model is fitted on")
 	f.StringVar(&calSeeds, "cal-seeds", "3", "seeds the accept gate is calibrated on")
@@ -390,8 +422,8 @@ func newDecideCmd() *cobra.Command {
 	f.BoolVar(&rotateSplits, "rotate", false, "also average every assignment of seeds to fit/calibrate/test with the same split sizes")
 	f.Float64Var(&streamNull, "stream-null", 0, "run anytime-valid e-process halting over the test stream under H0: mean <= p0 (optional)")
 	f.StringVar(&saveFile, "save", "", "write the model fitted on the fit seeds and gated on the calibration seeds, for serve (optional)")
+	f.StringVar(&dmnFile, "dmn", "", "export the fitted policy as an OMG DMN 1.3 XML decision table for audit (optional)")
 	f.StringVar(&outFile, "output", "", "also write the full result as JSON to this file (optional)")
-	_ = cmd.MarkFlagRequired("results")
 	return cmd
 }
 

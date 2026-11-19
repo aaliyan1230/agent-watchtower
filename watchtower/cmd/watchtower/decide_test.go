@@ -138,6 +138,36 @@ func TestDecideCommandStream(t *testing.T) {
 	}
 }
 
+func TestDecideCommandDMNExport(t *testing.T) {
+	dir := t.TempDir()
+	modelFile := filepath.Join(dir, "model.json")
+	dmnDirect := filepath.Join(dir, "direct.dmn")
+	dmnFromSaved := filepath.Join(dir, "saved.dmn")
+
+	if _, err := runVerify(t, "decide", "--results", writeArtifact(t), "--save", modelFile, "--dmn", dmnDirect); err != nil {
+		t.Fatalf("decide --save --dmn: %v", err)
+	}
+	if _, err := runVerify(t, "decide", "--model", modelFile, "--dmn", dmnFromSaved); err != nil {
+		t.Fatalf("decide --model --dmn: %v", err)
+	}
+	a, err := os.ReadFile(dmnDirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(dmnFromSaved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) {
+		t.Fatalf("DMN exported from saved model differs from direct export")
+	}
+	for _, want := range []string{`https://www.omg.org/spec/DMN/20191111/MODEL/`, `hitPolicy="FIRST"`, `decision_first_action`, `decision_judge_settle`} {
+		if !strings.Contains(string(a), want) {
+			t.Errorf("DMN XML missing %q", want)
+		}
+	}
+}
+
 func TestDecideCommandRejectsEmptySplit(t *testing.T) {
 	if _, err := runVerify(t, "decide", "--results", writeArtifact(t), "--test-seeds", "9"); err == nil {
 		t.Fatal("a split with no runs must fail")
