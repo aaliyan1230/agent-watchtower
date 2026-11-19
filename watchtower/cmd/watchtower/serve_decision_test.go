@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/decide"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/graph"
+	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/report"
 	"github.com/aaliyan1230/agent-watchtower/watchtower/internal/verify"
 )
 
@@ -86,7 +92,7 @@ func TestVerifyAndDecide(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := tt.cfg
 			cfg.Judge = tt.judge
-			r, judged := verifyAndDecide(run, cfg, tt.model)
+			r, judged := verifyAndDecide(run, cfg, tt.model, nil)
 			if judged != tt.wantJudged || r.Judged != tt.wantJudged {
 				t.Fatalf("judged = %v (report %v), want %v", judged, r.Judged, tt.wantJudged)
 			}
@@ -107,5 +113,93 @@ func TestVerifyAndDecide(t *testing.T) {
 				t.Fatal("a judge probe must record its posterior")
 			}
 		})
+	}
+}
+
+func TestVerifyAndDecideStreamingEProcessHaltsAndSkipsJudge(t *testing.T) {
+	run := reconstructTestdata(t, "clean_trace.json")
+	sig, _ := decide.Signature(verify.Verify(run, verify.Config{}))
+	// Fit a model where sig has 50% risk and the judge flags every run.
+	uncertain := decide.Fit(append(
+		repeatRuns(50, decide.Run{Signature: sig, Faulty: true, Judged: true, JudgeFlag: true}),
+		repeatRuns(50, decide.Run{Signature: sig, Judged: true})...))
+	uncertain.Costs = decide.DefaultCosts()
+
+	stream, err := decide.NewEProcess(decide.EProcessConfig{NullRate: 0.05, Alpha: 0.05, Signal: decide.SignalRisk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	judge := &countingJudge{findings: []verify.Finding{{Verifier: "judge", Source: "m", Message: "bad"}}}
+	cfg := verify.Config{Judge: judge}
+
+	var haltStep int
+	for step := 1; step <= 10; step++ {
+		r, _ := verifyAndDecide(run, cfg, uncertain, stream)
+		if r.Decision == nil || r.Decision.Stream == nil {
+			t.Fatalf("step %d: missing stream state in report decision", step)
+		}
+		if r.Decision.StreamHalted {
+			haltStep = step
+			break
+		}
+	}
+	if haltStep == 0 {
+		t.Fatal("e-process failed to halt under repeated high-risk runs")
+	}
+	callsAtHalt := judge.calls
+	// Subsequent runs after the stream halts must halt immediately without calling the judge.
+	r, judged := verifyAndDecide(run, cfg, uncertain, stream)
+	if judged || judge.calls != callsAtHalt {
+		t.Fatalf("judge was still called after stream halted: calls %d -> %d", callsAtHalt, judge.calls)
+	}
+	if r.Decision.Action != "halt" || !r.Decision.StreamHalted {
+		t.Fatalf("post-halt decision = %+v, want halt with streamHalted=true", r.Decision)
+	}
+}
+
+func TestServeStreamEndpoints(t *testing.T) {
+	stream, err := decide.NewEProcess(decide.EProcessConfig{NullRate: 0.05, Alpha: 0.05, Signal: decide.SignalNonPass})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Trigger a non-PASS verdict on every run by requiring trace closure.
+	cfg := verify.Config{Evidence: verify.EvidenceConfig{Enabled: true, Obligations: verify.EvidenceObligations{RequireTraceClosed: true}}}
+	mux := newServeMux(cfg, report.NewStore(time.Minute), nil, stream)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	raw := minimalOTLP(t, map[string]string{"agent.name": "worker-a"})
+	for i := 0; i < 4; i++ {
+		resp, err := http.Post(srv.URL+"/v1/traces", "application/x-protobuf", bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	resp, err := http.Get(srv.URL + "/v1/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var st decide.StreamState
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Steps != 4 || !st.Halted {
+		t.Fatalf("GET /v1/stream = %+v, want 4 steps and halted=true", st)
+	}
+
+	resetResp, err := http.Post(srv.URL+"/v1/stream/reset", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resetResp.Body.Close()
+	var reset decide.StreamState
+	if err := json.NewDecoder(resetResp.Body).Decode(&reset); err != nil {
+		t.Fatal(err)
+	}
+	if reset.Steps != 0 || reset.Halted {
+		t.Fatalf("POST /v1/stream/reset = %+v, want clean reset", reset)
 	}
 }

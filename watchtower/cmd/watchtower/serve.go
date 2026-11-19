@@ -37,12 +37,12 @@ func newServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			policy, err := loadDecisionModel(configFile)
+			policy, stream, err := loadDecision(configFile)
 			if err != nil {
 				return err
 			}
 			log.Printf("watchtower listening on %s", addr)
-			return http.ListenAndServe(addr, newServeMux(cfg, report.NewStore(5*time.Minute), policy))
+			return http.ListenAndServe(addr, newServeMux(cfg, report.NewStore(5*time.Minute), policy, stream))
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", ":4318", "listen address")
@@ -50,55 +50,106 @@ func newServeCmd() *cobra.Command {
 	return cmd
 }
 
-// loadDecisionModel reads the optional "decision": {"model": path} block
-// of the serve config; a relative path resolves against the config's
-// directory so the server can be spawned from anywhere.
-func loadDecisionModel(configFile string) (*decide.Model, error) {
+// loadDecision reads the optional "decision": {"model": path, "stream": {...}}
+// block of the serve config; a relative model path resolves against the
+// config's directory so the server can be spawned from anywhere.
+func loadDecision(configFile string) (*decide.Model, *decide.EProcess, error) {
 	if configFile == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	raw, err := os.ReadFile(configFile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var cfg struct {
 		Decision struct {
-			Model string `json:"model"`
+			Model  string                 `json:"model"`
+			Stream *decide.EProcessConfig `json:"stream"`
 		} `json:"decision"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil || cfg.Decision.Model == "" {
-		return nil, err
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, nil, err
 	}
-	path := cfg.Decision.Model
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(filepath.Dir(configFile), path)
+	var m *decide.Model
+	if cfg.Decision.Model != "" {
+		path := cfg.Decision.Model
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(configFile), path)
+		}
+		mraw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("decision model: %w", err)
+		}
+		var loaded decide.Model
+		if err := json.Unmarshal(mraw, &loaded); err != nil {
+			return nil, nil, fmt.Errorf("decision model %s: %w", path, err)
+		}
+		if loaded.Costs == (decide.Costs{}) {
+			loaded.Costs = decide.DefaultCosts()
+		}
+		m = &loaded
 	}
-	raw, err = os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("decision model: %w", err)
+	var stream *decide.EProcess
+	if cfg.Decision.Stream != nil {
+		stream, err = decide.NewEProcess(*cfg.Decision.Stream)
+		if err != nil {
+			return nil, nil, fmt.Errorf("decision stream: %w", err)
+		}
+		if m == nil && stream.Config().Signal == decide.SignalRisk {
+			return nil, nil, fmt.Errorf("decision stream signal %q requires a decision model", decide.SignalRisk)
+		}
 	}
-	var m decide.Model
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("decision model %s: %w", path, err)
-	}
-	if m.Costs == (decide.Costs{}) {
-		m.Costs = decide.DefaultCosts()
-	}
-	return &m, nil
+	return m, stream, nil
 }
 
-// verifyAndDecide verifies the run and, with a decision model, picks
-// its action. The judge is then a probe like any other: it runs only
-// when the decision says its answer is worth its price.
-func verifyAndDecide(run *graph.Run, cfg verify.Config, m *decide.Model) (*report.Report, bool) {
-	if m == nil {
+func toReportStream(st decide.StreamState) *report.StreamState {
+	return &report.StreamState{
+		Signal:    string(st.Signal),
+		NullRate:  st.NullRate,
+		Alpha:     st.Alpha,
+		Threshold: st.Threshold,
+		Steps:     st.Steps,
+		Mean:      st.Mean,
+		Wealth:    st.Wealth,
+		MaxWealth: st.MaxWealth,
+		Halted:    st.Halted,
+		HaltStep:  st.HaltStep,
+	}
+}
+
+// verifyAndDecide verifies the run and, with a decision model or
+// streaming e-process, picks its action. The judge is then a probe like
+// any other: it runs only when the decision says its answer is worth
+// its price (and the streaming circuit breaker has not already tripped).
+func verifyAndDecide(run *graph.Run, cfg verify.Config, m *decide.Model, stream *decide.EProcess) (*report.Report, bool) {
+	if m == nil && stream == nil {
 		return report.Build(run, verify.Verify(run, cfg), cfg.Judge != nil), cfg.Judge != nil
+	}
+	if m == nil {
+		findings := verify.Verify(run, cfg)
+		sig, _ := decide.Signature(findings)
+		_, _ = stream.Observe(decide.SignalValue(stream.Config().Signal, sig, 0))
+		st := stream.State()
+		action := string(decide.Accept)
+		if st.Halted {
+			action = string(decide.Halt)
+		}
+		r := report.Build(run, findings, cfg.Judge != nil)
+		r.Decision = &report.Decision{
+			Signature:    sig,
+			First:        action,
+			Action:       action,
+			StreamHalted: st.Halted,
+			Stream:       toReportStream(st),
+		}
+		return r, cfg.Judge != nil
 	}
 	det := cfg
 	det.Judge = nil
 	findings := verify.Verify(run, det)
 	sig, gaps := decide.Signature(findings)
-	d := m.Decide(decide.Observation{Signature: sig, CanReplay: gaps, CanJudge: cfg.Judge != nil}, m.Costs, true)
+	preHalted := stream != nil && stream.Halted()
+	d := m.Decide(decide.Observation{Signature: sig, CanReplay: gaps, CanJudge: !preHalted && cfg.Judge != nil}, m.Costs, !preHalted)
 	rec := &report.Decision{
 		Signature: sig,
 		Risk:      d.Risk,
@@ -112,19 +163,32 @@ func verifyAndDecide(run *graph.Run, cfg verify.Config, m *decide.Model) (*repor
 		rec.Expected[string(a)] = cost
 	}
 	judged := false
-	switch d.Action {
-	case decide.Judge:
-		js := verify.RunJudge(run, cfg.Judge)
-		findings = append(findings, js...)
-		judged = true
-		posterior := d.Risk
-		if !hasJudgeError(js) {
-			posterior = m.JudgePosterior(d.Risk, decide.JudgeFlag(js))
+	finalRisk := d.Risk
+	if !preHalted {
+		switch d.Action {
+		case decide.Judge:
+			js := verify.RunJudge(run, cfg.Judge)
+			findings = append(findings, js...)
+			judged = true
+			posterior := d.Risk
+			if !hasJudgeError(js) {
+				posterior = m.JudgePosterior(sig, d.Risk, decide.JudgeFlag(js))
+			}
+			finalRisk = posterior
+			s := m.Settle(posterior, m.Costs)
+			rec.Posterior, rec.Action, rec.Gated = &posterior, string(s.Action), s.Gated
+		case decide.Replay:
+			rec.Fallback = string(m.Settle(d.Risk, m.Costs).Action)
 		}
-		s := m.Settle(posterior, m.Costs)
-		rec.Posterior, rec.Action, rec.Gated = &posterior, string(s.Action), s.Gated
-	case decide.Replay:
-		rec.Fallback = string(m.Settle(d.Risk, m.Costs).Action)
+	}
+	if stream != nil {
+		_, _ = stream.Observe(decide.SignalValue(stream.Config().Signal, sig, finalRisk))
+		st := stream.State()
+		rec.Stream = toReportStream(st)
+		if st.Halted {
+			rec.Action = string(decide.Halt)
+			rec.StreamHalted = true
+		}
 	}
 	r := report.Build(run, findings, judged)
 	r.Decision = rec
@@ -143,18 +207,18 @@ func hasJudgeError(findings []verify.Finding) bool {
 // newServeMux wires ingest -> verify -> decide -> report store ->
 // retrieval endpoint. Split out so tests can mount it in an httptest
 // server.
-func newServeMux(cfg verify.Config, store *report.Store, m *decide.Model) http.Handler {
+func newServeMux(cfg verify.Config, store *report.Store, m *decide.Model, stream *decide.EProcess) http.Handler {
 	h := ingest.New(func(env *model.Envelope) ([]byte, error) {
 		run, err := graph.Reconstruct(env.Spans)
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct: %w", err)
 		}
-		r, judged := verifyAndDecide(run, cfg, m)
+		r, judged := verifyAndDecide(run, cfg, m, stream)
 		if judged {
 			in, out := cfg.Judge.Usage()
 			r.SetJudgeUsage(in, out)
-			if m, ok := cfg.Judge.(interface{ Model() string }); ok {
-				r.JudgeModel = m.Model()
+			if jm, ok := cfg.Judge.(interface{ Model() string }); ok {
+				r.JudgeModel = jm.Model()
 			}
 		}
 		store.Put(r.TraceID, r)
@@ -181,6 +245,30 @@ func newServeMux(cfg verify.Config, store *report.Store, m *decide.Model) http.H
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(rep)
+	})
+	mux.HandleFunc("/v1/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if stream == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stream.State())
+	})
+	mux.HandleFunc("/v1/stream/reset", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if stream == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stream.Reset())
 	})
 	return mux
 }
